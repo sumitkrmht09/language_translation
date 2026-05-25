@@ -891,8 +891,8 @@ def extract_reference_paths(xlf_path: Path) -> List[Tuple[str, str]]:
         fs_path_str = _parse_mif_path(raw)
         ext         = Path(fs_path_str).suffix.lower()
 
-        if ext not in MEDIA_EXTENSIONS:
-            print(f"    skip (unsupported ext '{ext}'): {fs_path_str!r}")
+        if not ext:
+            print(f"    skip (no extension): {fs_path_str!r}")
             continue
 
         abs_path = (base_dir / fs_path_str).resolve()
