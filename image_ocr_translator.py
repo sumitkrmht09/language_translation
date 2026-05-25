@@ -824,8 +824,10 @@ _OB_RE = re.compile(
 )
 
 def _parse_mif_path(raw_di: str) -> str:
-    decoded   = html.unescape(raw_di.strip())
-    converted = decoded.replace("<u>", "../").replace("<c>", "/")
+    first = html.unescape(raw_di.strip())
+    second = html.unescape(first)
+    unquoted = unquote(second)
+    converted = unquoted.replace("<u>", "../").replace("<c>", "/")
     converted = converted.replace("..//" , "../")   
     return converted
 
@@ -1063,21 +1065,30 @@ def process_xlf_references(
         if src_graphics_folder:
             src_g_root = Path(src_graphics_folder)
             sub = _subfolder_from_di(di_fs)
+            target_lower = abs_path.name.lower()
             
-            # Check 1: Structure match (Graphics/Graphics/image.pdf)
-            c1 = src_g_root / sub / abs_path.name
-            if c1.is_file():
-                found_src_path = c1
-            else:
-                # Check 2: Direct match inside root
-                c2 = src_g_root / abs_path.name
-                if c2.is_file():
-                    found_src_path = c2
-                else:
-                    # Check 3: Scan anywhere inside the uploaded directory structure
-                    for match in src_g_root.rglob(abs_path.name):
-                        if match.is_file():
-                            found_src_path = match
+            # Check 1: Structure match (Graphics/Graphics/image.pdf) with case-insensitivity
+            c1_dir = src_g_root / sub
+            if c1_dir.is_dir():
+                for item in c1_dir.iterdir():
+                    if item.is_file() and item.name.lower() == target_lower:
+                        found_src_path = item
+                        break
+            
+            if not found_src_path:
+                # Check 2: Direct match inside root with case-insensitivity
+                if src_g_root.is_dir():
+                    for item in src_g_root.iterdir():
+                        if item.is_file() and item.name.lower() == target_lower:
+                            found_src_path = item
+                            break
+            
+            if not found_src_path:
+                # Check 3: Scan anywhere inside the uploaded directory structure with case-insensitivity
+                if src_g_root.is_dir():
+                    for item in src_g_root.rglob("*"):
+                        if item.is_file() and item.name.lower() == target_lower:
+                            found_src_path = item
                             break
 
         if not found_src_path:
