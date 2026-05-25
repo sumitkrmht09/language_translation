@@ -1010,9 +1010,14 @@ def _subfolder_from_di(di_fs_path: str) -> Path:
         if part not in skip
         and not (len(part) == 3 and part[1] == ':')  
     ]
-    if not real_parts:
+    collapsed_parts = []
+    for part in real_parts:
+        if collapsed_parts and collapsed_parts[-1].lower() == 'graphics' and part.lower() == 'graphics':
+            continue
+        collapsed_parts.append(part)
+    if not collapsed_parts:
         return Path('.')
-    return Path(*real_parts)
+    return Path(*collapsed_parts)
 
 def process_xlf_references(
     xlf_path,
