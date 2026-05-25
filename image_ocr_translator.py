@@ -1072,28 +1072,33 @@ def process_xlf_references(
             sub = _subfolder_from_di(di_fs)
             import unicodedata
             target_norm = unicodedata.normalize('NFC', abs_path.name.lower())
+            target_pdf = target_norm + "f" if target_norm.endswith(".pd") else None
             
-            # Check 1: Structure match (Graphics/Graphics/image.pdf) with case-insensitivity & normalization
+            def matches_target(name: str) -> bool:
+                norm_name = unicodedata.normalize('NFC', name.lower())
+                return norm_name == target_norm or (target_pdf is not None and norm_name == target_pdf)
+
+            # Check 1: Structure match (Graphics/Graphics/image.pdf) with case-insensitivity, normalization & extension fallback
             c1_dir = src_g_root / sub
             if c1_dir.is_dir():
                 for item in c1_dir.iterdir():
-                    if item.is_file() and unicodedata.normalize('NFC', item.name.lower()) == target_norm:
+                    if item.is_file() and matches_target(item.name):
                         found_src_path = item
                         break
             
             if not found_src_path:
-                # Check 2: Direct match inside root with case-insensitivity & normalization
+                # Check 2: Direct match inside root with case-insensitivity, normalization & extension fallback
                 if src_g_root.is_dir():
                     for item in src_g_root.iterdir():
-                        if item.is_file() and unicodedata.normalize('NFC', item.name.lower()) == target_norm:
+                        if item.is_file() and matches_target(item.name):
                             found_src_path = item
                             break
             
             if not found_src_path:
-                # Check 3: Scan anywhere inside the uploaded directory structure with case-insensitivity & normalization
+                # Check 3: Scan anywhere inside the uploaded directory structure with case-insensitivity, normalization & extension fallback
                 if src_g_root.is_dir():
                     for item in src_g_root.rglob("*"):
-                        if item.is_file() and unicodedata.normalize('NFC', item.name.lower()) == target_norm:
+                        if item.is_file() and matches_target(item.name):
                             found_src_path = item
                             break
 
