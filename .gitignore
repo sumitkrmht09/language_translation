@@ -1,0 +1,19 @@
+# Virtual Environment
+.venv/
+venv/
+ENV/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment Secrets
+.env
+
+# Application directories
+uploads/
+output/
+workspaces/
+*.checkpoint.json
+*.xlsx
