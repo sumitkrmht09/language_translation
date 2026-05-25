@@ -1041,11 +1041,11 @@ def translate_file(input_path, output_root, target_lang, args, model_to_use):
 
     output_root.mkdir(parents=True, exist_ok=True)
 
-    # Place the translated XLF at the top of output_root so it becomes the
-    # root anchor inside the deliverable ZIP. Graphics live as siblings under
-    # output_root/<sub>/..., which makes the in-XLF image references clean
-    # relative paths (e.g. "Graphics/Logo.pdf") rather than "../Graphics/..."
-    xlf_out_path = output_root / input_path.name
+    # Place the translated XLF inside a subfolder named translated_<lang> under output_root
+    # so that relative paths (e.g. "../Graphics/...") resolve correctly
+    xlf_dir = output_root / f"translated_{target_lang}"
+    xlf_dir.mkdir(parents=True, exist_ok=True)
+    xlf_out_path = xlf_dir / input_path.name
 
     tree, root, ns = load_xliff(str(input_path))
     all_units = extract_units(root, ns)
