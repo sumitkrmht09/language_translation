@@ -771,11 +771,38 @@ def save_checkpoint(path, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 _OB_RE = re.compile(
-    r'(<(?:[A-Za-z_][\w\-]*:)?ImportObFile\b[^>]*>)'   
-    r'([^<]+)'                                          
-    r'(</(?:[A-Za-z_][\w\-]*:)?ImportObFile>)',         
+    r'(<(?:[A-Za-z_][\w\-]*:)?ImportObFile\b[^>]*>)'
+    r'([^<]+)'
+    r'(</(?:[A-Za-z_][\w\-]*:)?ImportObFile>)',
     re.IGNORECASE,
 )
+
+_DI_RE = re.compile(
+    r'(<(?:[A-Za-z_][\w\-]*:)?ImportObFileDI\b[^>]*>)'
+    r'([^<]+)'
+    r'(</(?:[A-Za-z_][\w\-]*:)?ImportObFileDI>)',
+    re.IGNORECASE,
+)
+
+
+def _encode_path_as_di(path: str) -> str:
+    """Encode a relative path into FrameMaker's Device-Independent format.
+
+    FrameMaker stores DI paths using `<u>` (up one dir) and `<c>` (path separator),
+    HTML-encoded inside the MIF blob as `&lt;u&gt;` and `&lt;c&gt;`.
+
+    Example: `../Graphics/Logo.pdf` → `&lt;u&gt;&lt;c&gt;Graphics&lt;c&gt;Logo.pdf`
+    """
+    parts = path.replace("\\", "/").split("/")
+    tokens = []
+    for part in parts:
+        if part == "..":
+            tokens.append("&lt;u&gt;")
+        elif part in ("", "."):
+            continue
+        else:
+            tokens.append("&lt;c&gt;" + part)
+    return "".join(tokens)
 
 
 def _basename_of_mif_value(raw: str) -> str:
@@ -919,6 +946,55 @@ def update_xlf_references(xlf_path, path_mapping):
     if miss_samples:
         log.info(f"  ({len(miss_samples)} <ImportObFile> value(s) intentionally left alone — none matched a translated file):")
         for s in miss_samples[:5]:
+            log.info(f"    skip: {s!r}")
+
+    # ── Rewrite <ImportObFileDI> entries too ─────────────────────────────────
+    # FrameMaker uses ImportObFileDI as the *primary* path reference (the portable
+    # device-independent form). Without updating it, FrameMaker resolves the
+    # original DI path and fails to find the translated images, even though
+    # ImportObFile has been correctly rewritten above.
+    original_basename_to_new: dict[str, str] = {}
+    for key, new_val in path_mapping.items():
+        if not key or "/" in key or "\\" in key or ":" in key or "&lt;" in key or "<" in key:
+            continue
+        original_basename_to_new[key.lower()] = new_val
+
+    di_rewrite_count = 0
+    di_miss_samples: list = []
+
+    def _replace_di(match: re.Match) -> str:
+        nonlocal di_rewrite_count
+        head, current, tail = match.group(1), match.group(2), match.group(3)
+
+        decoded   = html.unescape(current.strip())
+        converted = decoded.replace("<u>", "../").replace("<c>", "/").replace("..//", "../")
+        original_bn = Path(converted).name.lower()
+
+        new_val = original_basename_to_new.get(original_bn)
+        if not new_val and original_bn.endswith(".pd"):
+            new_val = original_basename_to_new.get(original_bn + "f")
+        if not new_val and original_bn.endswith(".pdf"):
+            new_val = original_basename_to_new.get(original_bn[:-1])
+
+        if new_val:
+            new_di = _encode_path_as_di(new_val)
+            di_rewrite_count += 1
+            log.info(f"  ✓ DI: {current!r}  →  {new_di!r}  (matched {original_bn!r})")
+            return f"{head}{new_di}{tail}"
+
+        if len(di_miss_samples) < 10:
+            di_miss_samples.append(current)
+        return match.group(0)
+
+    new_mif = _DI_RE.sub(_replace_di, new_mif)
+
+    log.info(
+        f"update_xlf_references: rewrote {di_rewrite_count} <ImportObFileDI> "
+        f"reference(s) inside the MIF blob"
+    )
+    if di_miss_samples:
+        log.info(f"  ({len(di_miss_samples)} <ImportObFileDI> value(s) left alone — none matched a translated file):")
+        for s in di_miss_samples[:5]:
             log.info(f"    skip: {s!r}")
 
     raw = new_mif.encode("utf-8", errors="replace")
