@@ -1070,29 +1070,30 @@ def process_xlf_references(
         if src_graphics_folder:
             src_g_root = Path(src_graphics_folder)
             sub = _subfolder_from_di(di_fs)
-            target_lower = abs_path.name.lower()
+            import unicodedata
+            target_norm = unicodedata.normalize('NFC', abs_path.name.lower())
             
-            # Check 1: Structure match (Graphics/Graphics/image.pdf) with case-insensitivity
+            # Check 1: Structure match (Graphics/Graphics/image.pdf) with case-insensitivity & normalization
             c1_dir = src_g_root / sub
             if c1_dir.is_dir():
                 for item in c1_dir.iterdir():
-                    if item.is_file() and item.name.lower() == target_lower:
+                    if item.is_file() and unicodedata.normalize('NFC', item.name.lower()) == target_norm:
                         found_src_path = item
                         break
             
             if not found_src_path:
-                # Check 2: Direct match inside root with case-insensitivity
+                # Check 2: Direct match inside root with case-insensitivity & normalization
                 if src_g_root.is_dir():
                     for item in src_g_root.iterdir():
-                        if item.is_file() and item.name.lower() == target_lower:
+                        if item.is_file() and unicodedata.normalize('NFC', item.name.lower()) == target_norm:
                             found_src_path = item
                             break
             
             if not found_src_path:
-                # Check 3: Scan anywhere inside the uploaded directory structure with case-insensitivity
+                # Check 3: Scan anywhere inside the uploaded directory structure with case-insensitivity & normalization
                 if src_g_root.is_dir():
                     for item in src_g_root.rglob("*"):
-                        if item.is_file() and item.name.lower() == target_lower:
+                        if item.is_file() and unicodedata.normalize('NFC', item.name.lower()) == target_norm:
                             found_src_path = item
                             break
 

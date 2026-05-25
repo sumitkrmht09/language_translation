@@ -81,6 +81,32 @@ def cleanup_workspace(workspace_dir: Path):
         logger.error(f"Error cleaning up workspace {workspace_dir}: {e}")
 
 
+def extract_zip_safely(zip_path: Path, extract_to: Path):
+    logger.info(f"Extracting ZIP safely to {extract_to} (correcting non-ASCII encodings)")
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        for member in zf.infolist():
+            filename = member.filename
+            try:
+                raw_bytes = filename.encode('cp437')
+                try:
+                    correct_name = raw_bytes.decode('utf-8')
+                except UnicodeDecodeError:
+                    correct_name = raw_bytes.decode('cp1252')
+            except Exception:
+                correct_name = filename
+                
+            correct_name = correct_name.replace('\\', '/')
+            target_path = extract_to / correct_name
+            
+            if member.is_dir():
+                target_path.mkdir(parents=True, exist_ok=True)
+            else:
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(member) as source, open(target_path, 'wb') as target:
+                    shutil.copyfileobj(source, target)
+
+
+
 def _download_file(url: str, dest: Path, label: str) -> Path:
     """Download a file from a URL to a local path."""
     logger.info(f"Downloading {label} from: {url}")
@@ -177,9 +203,7 @@ async def translate_via_urls(
             graphics_source_folder = workspace_dir / "extracted_graphics"
             graphics_source_folder.mkdir(exist_ok=True)
 
-            logger.info(f"Extracting graphics archive to {graphics_source_folder}")
-            with zipfile.ZipFile(zip_save_path, "r") as zf:
-                zf.extractall(graphics_source_folder)
+            extract_zip_safely(zip_save_path, graphics_source_folder)
 
         # 4. Import and execute the pipeline
         from translate_xliff_openai_2 import translate_file as run_translation_pipeline
@@ -290,8 +314,7 @@ async def translate_via_upload(
                 shutil.copyfileobj(graphics_zip.file, buffer)
             graphics_source_folder = workspace_dir / "extracted_graphics"
             graphics_source_folder.mkdir(exist_ok=True)
-            with zipfile.ZipFile(zip_save_path, "r") as zf:
-                zf.extractall(graphics_source_folder)
+            extract_zip_safely(zip_save_path, graphics_source_folder)
 
         from translate_xliff_openai_2 import translate_file as run_translation_pipeline
         args = PipelineArgs(batch_size=40, dry_run=False, resume=False, graphics_source_folder=graphics_source_folder)
