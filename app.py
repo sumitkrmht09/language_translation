@@ -76,11 +76,20 @@ def home():
 @app.post("/translate")
 async def translate(
     background_tasks: BackgroundTasks,
+    target_lang: Optional[str] = None,
     file: UploadFile = File(..., description="The FrameMaker manual XLIFF file (.xlf or .xliff)"),
     graphics_zip: Optional[UploadFile] = File(None, description="ZIP archive containing source graphics referenced by the manual"),
-    target_lang: str = Form(..., description="Target ISO language code, e.g. 'de', 'fr', 'zh-CN'"),
+    target_lang_form: Optional[str] = Form(None, alias="target_lang", description="Target ISO language code, e.g. 'de', 'fr', 'zh-CN'"),
     credentials: str = Depends(verify_token)
 ):
+    # Resolve target_lang from either query parameter or form parameter
+    resolved_lang = target_lang or target_lang_form
+    if not resolved_lang:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Missing parameter: 'target_lang' must be provided in either the query string or form data."
+        )
+
     # Validate file extension
     ext = Path(file.filename).suffix.lower()
     if ext not in [".xlf", ".xliff"]:
@@ -91,11 +100,15 @@ async def translate(
 
     # Validate target language
     from translate_xliff_openai_2 import LANGUAGES
-    if target_lang not in LANGUAGES:
+    if resolved_lang not in LANGUAGES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported target language. Supported codes: {', '.join(LANGUAGES.keys())}"
         )
+
+    # Use the resolved language code throughout
+    target_lang = resolved_lang
+
 
     # 1. Create secure workspace
     request_id = str(uuid.uuid4())
