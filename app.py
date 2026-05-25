@@ -9,6 +9,7 @@ from typing import Optional
 
 import httpx
 from fastapi import FastAPI, UploadFile, File, Form, Query, Depends, HTTPException, status, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -38,7 +39,17 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Enable CORS for frontend web access
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 security = HTTPBearer()
+
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     secret_key = os.environ.get("API_SECRET_KEY")
