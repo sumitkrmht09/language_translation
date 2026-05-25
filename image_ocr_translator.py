@@ -1120,8 +1120,9 @@ def process_xlf_references(
                     rename_with_lang=rename_with_lang,
                 )
             else:
-                print(f"  - Unsupported extension {ext} — skipping.")
-                continue
+                print(f"  - Blindly copying unknown extension {ext} file: {abs_path.name}")
+                new_name = abs_path.name
+                shutil.copy2(str(abs_path), str(dest_folder / new_name))
 
             if not new_name:
                 continue
