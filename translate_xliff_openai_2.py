@@ -785,24 +785,36 @@ _DI_RE = re.compile(
 )
 
 
+_DI_UP = "&lt;u&gt;"
+_DI_SEP = "&lt;c&gt;"
+
+
 def _encode_path_as_di(path: str) -> str:
     """Encode a relative path into FrameMaker's Device-Independent format.
 
-    FrameMaker stores DI paths using `<u>` (up one dir) and `<c>` (path separator),
-    HTML-encoded inside the MIF blob as `&lt;u&gt;` and `&lt;c&gt;`.
+    FrameMaker MIF DI grammar:
+      `<u>` = up one directory (parent)
+      `<c>` = path separator between components (acts like "/")
 
-    Example: `../Graphics/Logo.pdf` → `&lt;u&gt;&lt;c&gt;Graphics&lt;c&gt;Logo.pdf`
+    `<c>` is a SEPARATOR — it sits between tokens, never before the first one.
+    A leading `<c>` makes the decoded path start with "/", which FrameMaker
+    interprets as an absolute filesystem path (which then fails to resolve on
+    Linux/Docker, e.g. "/Graphics/Logo.pdf"). Between two consecutive `<u>`
+    tokens no separator is emitted.
+
+      `../Graphics/Logo.pdf`     -> `&lt;u&gt;&lt;c&gt;Graphics&lt;c&gt;Logo.pdf`
+      `Graphics/Logo.pdf`        -> `Graphics&lt;c&gt;Logo.pdf`
+      `../../Graphics/Logo.pdf`  -> `&lt;u&gt;&lt;u&gt;&lt;c&gt;Graphics&lt;c&gt;Logo.pdf`
+      `Logo.pdf`                 -> `Logo.pdf`
     """
-    parts = path.replace("\\", "/").split("/")
-    tokens = []
+    parts = [p for p in path.replace("\\", "/").split("/") if p not in ("", ".")]
+    out: list[str] = []
     for part in parts:
-        if part == "..":
-            tokens.append("&lt;u&gt;")
-        elif part in ("", "."):
-            continue
-        else:
-            tokens.append("&lt;c&gt;" + part)
-    return "".join(tokens)
+        token = _DI_UP if part == ".." else part
+        if out and not (token == _DI_UP and out[-1] == _DI_UP):
+            out.append(_DI_SEP)
+        out.append(token)
+    return "".join(out)
 
 
 def _basename_of_mif_value(raw: str) -> str:

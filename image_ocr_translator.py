@@ -1012,7 +1012,7 @@ def _subfolder_from_di(di_fs_path: str) -> Path:
     ]
     collapsed_parts = []
     for part in real_parts:
-        if collapsed_parts and collapsed_parts[-1].lower() == 'graphics' and part.lower() == 'graphics':
+        if collapsed_parts and collapsed_parts[-1].lower() == part.lower():
             continue
         collapsed_parts.append(part)
     if not collapsed_parts:
