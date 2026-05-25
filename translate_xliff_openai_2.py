@@ -785,35 +785,33 @@ _DI_RE = re.compile(
 )
 
 
-_DI_UP = "&lt;u&gt;"
-_DI_SEP = "&lt;c&gt;"
-
-
 def _encode_path_as_di(path: str) -> str:
-    """Encode a relative path into FrameMaker's Device-Independent format.
+    """Encode a relative path into FrameMaker's Device-Independent pathname.
 
-    FrameMaker MIF DI grammar:
-      `<u>` = up one directory (parent)
-      `<c>` = path separator between components (acts like "/")
+    Per Adobe MIF Reference, page 7-8 (`Device-independent pathnames`):
 
-    `<c>` is a SEPARATOR — it sits between tokens, never before the first one.
-    A leading `<c>` makes the decoded path start with "/", which FrameMaker
-    interprets as an absolute filesystem path (which then fails to resolve on
-    Linux/Docker, e.g. "/Graphics/Logo.pdf"). Between two consecutive `<u>`
-    tokens no separator is emitted.
+      `<r>`  Root of UNIX file tree (UNIX absolute path scheme)
+      `<v>`  Volume / drive (Windows absolute path scheme)
+      `<u>`  Up one level in the file tree
+      `<c>`  Component — precedes every path component name
 
+    Each name (including the first) is introduced by `<c>`. `<u>` is emitted
+    once per parent-traversal with no separator between consecutive `<u>`s.
+    Tokens are HTML-escaped (`&lt;c&gt;`, `&lt;u&gt;`) because the MIF blob
+    is itself stored as an XML-escaped string inside the XLF.
+
+    Examples (matches real FrameMaker MIF output):
       `../Graphics/Logo.pdf`     -> `&lt;u&gt;&lt;c&gt;Graphics&lt;c&gt;Logo.pdf`
-      `Graphics/Logo.pdf`        -> `Graphics&lt;c&gt;Logo.pdf`
+      `Graphics/Logo.pdf`        -> `&lt;c&gt;Graphics&lt;c&gt;Logo.pdf`
       `../../Graphics/Logo.pdf`  -> `&lt;u&gt;&lt;u&gt;&lt;c&gt;Graphics&lt;c&gt;Logo.pdf`
-      `Logo.pdf`                 -> `Logo.pdf`
     """
     parts = [p for p in path.replace("\\", "/").split("/") if p not in ("", ".")]
     out: list[str] = []
     for part in parts:
-        token = _DI_UP if part == ".." else part
-        if out and not (token == _DI_UP and out[-1] == _DI_UP):
-            out.append(_DI_SEP)
-        out.append(token)
+        if part == "..":
+            out.append("&lt;u&gt;")
+        else:
+            out.append("&lt;c&gt;" + part)
     return "".join(out)
 
 
@@ -961,15 +959,24 @@ def update_xlf_references(xlf_path, path_mapping):
             log.info(f"    skip: {s!r}")
 
     # ── Rewrite <ImportObFileDI> entries too ─────────────────────────────────
-    # FrameMaker uses ImportObFileDI as the *primary* path reference (the portable
-    # device-independent form). Without updating it, FrameMaker resolves the
-    # original DI path and fails to find the translated images, even though
-    # ImportObFile has been correctly rewritten above.
+    # Per the Adobe MIF Reference (page 7-8, "Device-independent pathnames"),
+    # FrameMaker uses ImportObFileDI as the *authoritative* graphic reference.
+    # ImportObFile is FrameMaker 1.0 legacy and is only written for backward
+    # compatibility — FrameMaker will NOT use it to resolve graphics on import
+    # when an ImportObFileDI is present. Without updating the DI we leave the
+    # original `<u><c>Graphics<c>Graphics<c>Logo.pdf` in place, FrameMaker
+    # tries to resolve `../Graphics/Graphics/Logo.pdf` from the XLF location
+    # and fails — which is exactly the "image not found" symptom reported.
+    import unicodedata
+
+    def _norm(s: str) -> str:
+        return unicodedata.normalize("NFC", s).lower()
+
     original_basename_to_new: dict[str, str] = {}
     for key, new_val in path_mapping.items():
         if not key or "/" in key or "\\" in key or ":" in key or "&lt;" in key or "<" in key:
             continue
-        original_basename_to_new[key.lower()] = new_val
+        original_basename_to_new[_norm(key)] = new_val
 
     di_rewrite_count = 0
     di_miss_samples: list = []
@@ -980,7 +987,7 @@ def update_xlf_references(xlf_path, path_mapping):
 
         decoded   = html.unescape(current.strip())
         converted = decoded.replace("<u>", "../").replace("<c>", "/").replace("..//", "../")
-        original_bn = Path(converted).name.lower()
+        original_bn = _norm(Path(converted).name)
 
         new_val = original_basename_to_new.get(original_bn)
         if not new_val and original_bn.endswith(".pd"):
@@ -1004,6 +1011,16 @@ def update_xlf_references(xlf_path, path_mapping):
         f"update_xlf_references: rewrote {di_rewrite_count} <ImportObFileDI> "
         f"reference(s) inside the MIF blob"
     )
+    if di_rewrite_count == 0 and rewrite_count > 0:
+        log.error(
+            "update_xlf_references: !!! ImportObFile was rewritten but NO "
+            "ImportObFileDI entries matched — FrameMaker will use the STALE "
+            "DI paths and images will NOT load on import. Mapping basenames: %s",
+            list(original_basename_to_new.keys())[:10],
+        )
+        log.error("  Sample stale DI values that did not match:")
+        for s in di_miss_samples[:5]:
+            log.error(f"    {s!r}")
     if di_miss_samples:
         log.info(f"  ({len(di_miss_samples)} <ImportObFileDI> value(s) left alone — none matched a translated file):")
         for s in di_miss_samples[:5]:
