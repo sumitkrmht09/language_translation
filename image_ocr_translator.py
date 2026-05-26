@@ -1102,6 +1102,7 @@ def process_xlf_references(
             continue
 
         print(f"  ✓ Located image in uploaded Graphics folder -> {found_src_path}")
+        orig_name = abs_path.name
         abs_path = found_src_path
 
         sub = _subfolder_from_di(di_fs)
@@ -1134,6 +1135,12 @@ def process_xlf_references(
                 shutil.copy2(str(abs_path), str(dest_folder / new_name))
 
             saved_abs = dest_folder / new_name
+            final_abs = dest_folder / orig_name
+            if saved_abs.exists() and saved_abs != final_abs:
+                if final_abs.exists():
+                    final_abs.unlink()
+                saved_abs.rename(final_abs)
+            saved_abs = final_abs
 
             # Calculated exact relative path from nested XLIFF folder out to Graphics folder
             mif_ref = os.path.relpath(str(saved_abs), str(xlf_out_dir)).replace(os.sep, "/")

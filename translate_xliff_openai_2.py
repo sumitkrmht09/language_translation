@@ -1220,18 +1220,18 @@ def translate_file(input_path, output_root, target_lang, args, model_to_use):
             src_graphics_folder=getattr(args, "graphics_source_folder", None),  # Pass uploaded input target 
         )
 
-        if path_mapping:
-            print("\n  Rewriting <ImportObFile> entries inside the translated XLIFF...")
-            update_xlf_references(xlf_out_path, path_mapping)
+        # if path_mapping:
+        #     print("\n  Rewriting <ImportObFile> entries inside the translated XLIFF...")
+        #     update_xlf_references(xlf_out_path, path_mapping)
 
-        if path_mapping:
-            print("\n  Embedding translated graphics directly inside XLIFF...")
-            embed_images_in_xlf(
-                xlf_path=xlf_out_path,
-                path_mapping=path_mapping,
-                xlf_out_dir=xlf_out_path.parent,
-                ns=ns,
-            )
+        # if path_mapping:
+        #     print("\n  Embedding translated graphics directly inside XLIFF...")
+        #     embed_images_in_xlf(
+        #         xlf_path=xlf_out_path,
+        #         path_mapping=path_mapping,
+        #         xlf_out_dir=xlf_out_path.parent,
+        #         ns=ns,
+        #     )
 
         print("\n  ✓  Graphics processing complete")
 
