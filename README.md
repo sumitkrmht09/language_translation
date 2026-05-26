@@ -59,6 +59,8 @@ translated_de/
 
 ## 🛠️ Key Technical Features & Workarounds
 
+* **Binary Image Embedding inside XLIFF**: For image formats like `.png`, `.jpeg`, `.jpg`, `.pdf`, the pipeline reads the translated files from disk, base64 encodes their binary data, and embeds them directly inside the XLIFF document as standard XLIFF `<bin-unit>` objects inside the XML `<body>`. This provides a unified XLIFF container holding both text translations and binary graphics assets.
+* **Resilient Copying Fallback**: If an image or PDF document fails to open, parse, or translate during OCR (due to file corruption or unusual format states), the system gracefully catches the error, blindly copies the original graphic file, and maps it to prevent any pipeline crashes or broken links in FrameMaker.
 * **Unicode NFC Normalization**: Prevents composition discrepancies of non-ASCII characters (e.g. German umlauts like `ä`, `ö`, `ü`) during filename matching by normalizing all strings to NFC.
 * **CP437 Safe ZIP Extraction**: Windows zip utilities often compress filenames with legacy CP437/CP1252 encodings. The extraction logic auto-detects and decodes these to UTF-8 to prevent filename corruption on Linux servers.
 * **Blind-Copy Unknown Formats (The `.pd` bug)**: FrameMaker frequently truncates `.pdf` extension paths to `.pd` inside references. The system automatically performs `.pd` -> `.pdf` fallback matches, and blindly copies unknown file extensions directly to ensure no graphics links break.
