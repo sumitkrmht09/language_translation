@@ -1,373 +1,179 @@
-import os
+import sys
+if sys.stdout.encoding != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+if sys.stderr.encoding != 'utf-8':
+    try:
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
+from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks
+from fastapi.responses import FileResponse
+from pathlib import Path
 import shutil
 import uuid
 import zipfile
-import logging
-import tempfile
-from pathlib import Path
-from typing import Optional
 
-import httpx
-from fastapi import FastAPI, UploadFile, File, Form, Query, Depends, HTTPException, status, BackgroundTasks
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel
-from dotenv import load_dotenv
+from image_ocr_translator import process_image, process_pdf
 
-# Load environment variables
-load_dotenv()
+app = FastAPI()
 
-# Setup logging
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s  %(levelname)-8s  %(message)s",
-                    datefmt="%H:%M:%S")
-logger = logging.getLogger("api_server")
+UPLOAD_DIR = Path("uploads")
+OUTPUT_DIR = Path("output")
 
-# Load configuration and validate
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    logger.warning("OPENAI_API_KEY environment variable is not set in this context!")
+UPLOAD_DIR.mkdir(exist_ok=True)
+OUTPUT_DIR.mkdir(exist_ok=True)
 
-API_SECRET_KEY = os.environ.get("API_SECRET_KEY")
-if not API_SECRET_KEY:
-    logger.warning("API_SECRET_KEY environment variable is not set. API is running WITHOUT AUTHENTICATION!")
-
-app = FastAPI(
-    title="FrameMaker XLIFF & Graphics Translator API",
-    description="Automated technical manual translation and graphics OCR processing endpoint for FrameMaker technical manuals.",
-    version="1.0.0"
-)
-
-# Enable CORS for frontend web access
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-security = HTTPBearer()
-
-
-def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    secret_key = os.environ.get("API_SECRET_KEY")
-    if not secret_key:
-        return credentials.credentials
-    if credentials.credentials != secret_key:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing API Secret Key",
-        )
-    return credentials.credentials
-
-
-# ── Dummy args namespace for pipeline interface ──────────────────────────────
-class PipelineArgs:
-    def __init__(self, batch_size=40, dry_run=False, resume=False, graphics_source_folder=None):
-        self.batch_size = batch_size
-        self.dry_run = dry_run
-        self.resume = resume
-        self.graphics_source_folder = graphics_source_folder
-
-
-def cleanup_workspace(workspace_dir: Path):
-    try:
-        if workspace_dir.exists():
-            shutil.rmtree(workspace_dir)
-            logger.info(f"Cleaned up temporary workspace: {workspace_dir}")
-    except Exception as e:
-        logger.error(f"Error cleaning up workspace {workspace_dir}: {e}")
-
-
-def extract_zip_safely(zip_path: Path, extract_to: Path):
-    logger.info(f"Extracting ZIP safely to {extract_to} (extracting to multiple encoding candidates to prevent mismatches)")
-    with zipfile.ZipFile(zip_path, "r") as zf:
-        for member in zf.infolist():
-            filename = member.filename
-            candidates = set()
-            
-            # Candidate 1: Direct decoding by zipfile
-            candidates.add(filename)
-            
-            # Candidate 2: Try UTF-8 / CP1252 / CP437 alternatives
-            try:
-                raw_bytes = filename.encode('cp437')
-                try:
-                    candidates.add(raw_bytes.decode('utf-8'))
-                except UnicodeDecodeError:
-                    pass
-                try:
-                    candidates.add(raw_bytes.decode('cp1252'))
-                except Exception:
-                    pass
-                try:
-                    candidates.add(raw_bytes.decode('cp437'))
-                except Exception:
-                    pass
-            except Exception:
-                pass
-            
-            # Extract the member to all candidate filenames
-            for name in candidates:
-                name_clean = name.replace('\\', '/')
-                # Skip empty or absolute paths out of boundary for safety
-                if not name_clean.strip() or name_clean.startswith('/') or '../' in name_clean:
-                    continue
-                target_path = extract_to / name_clean
-                if member.is_dir():
-                    target_path.mkdir(parents=True, exist_ok=True)
-                else:
-                    target_path.parent.mkdir(parents=True, exist_ok=True)
-                    with zf.open(member) as source, open(target_path, 'wb') as target:
-                        shutil.copyfileobj(source, target)
-
-
-
-def _download_file(url: str, dest: Path, label: str) -> Path:
-    """Download a file from a URL to a local path."""
-    logger.info(f"Downloading {label} from: {url}")
-    try:
-        with httpx.Client(follow_redirects=True, timeout=300) as client:
-            resp = client.get(url)
-            resp.raise_for_status()
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(resp.content)
-            logger.info(f"Downloaded {label}: {len(resp.content)} bytes -> {dest}")
-            return dest
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=400, detail=f"Failed to download {label}: HTTP {e.response.status_code}")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to download {label}: {e}")
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  ENDPOINT 1: URL-based (for ChatGPT Custom GPT Actions)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TranslateRequest(BaseModel):
-    xlf_url: str
-    graphics_zip_url: Optional[str] = None
-    target_lang: str
-
-
-def get_git_commit():
-    try:
-        import subprocess
-        out = subprocess.check_output(["git", "log", "-n", "1", "--format=%h - %s"], text=True)
-        return out.strip()
-    except Exception:
-        return "Unknown"
 
 @app.get("/")
 def home():
-    return {
-        "status": "online",
-        "service": "FrameMaker XLIFF & Graphics Translator API",
-        "auth_enabled": bool(API_SECRET_KEY),
-        "commit": get_git_commit()
-    }
+    return {"message": "Translation API Running"}
 
 
 @app.post("/translate")
-async def translate_via_urls(
-    body: TranslateRequest,
-    background_tasks: BackgroundTasks,
-    credentials: str = Depends(verify_token),
+async def translate_file(
+    file: UploadFile = File(...),
+    target_lang: str = Form(...)
 ):
-    """
-    Accepts download URLs for the XLIFF file and optional graphics ZIP.
-    Downloads them server-side, runs the translation pipeline, and returns
-    the translated ZIP archive.
-    """
-    target_lang = body.target_lang
-    xlf_url = body.xlf_url
-    graphics_zip_url = body.graphics_zip_url
 
-    # Validate target language
-    from translate_xliff_openai_2 import LANGUAGES
-    if target_lang not in LANGUAGES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported target language '{target_lang}'. Supported: {', '.join(LANGUAGES.keys())}"
-        )
+    unique_id = uuid.uuid4().hex[:8]
 
-    # 1. Create secure workspace
-    request_id = str(uuid.uuid4())
-    workspace_dir = Path("workspaces") / request_id
-    input_dir = workspace_dir / "input"
-    output_dir = workspace_dir / "output"
+    input_path = UPLOAD_DIR / f"{unique_id}_{file.filename}"
 
-    input_dir.mkdir(parents=True, exist_ok=True)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    with open(input_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
 
-    # Register workspace cleanup task
-    background_tasks.add_task(cleanup_workspace, workspace_dir)
+    ext = input_path.suffix.lower()
 
     try:
-        # 2. Download XLIFF file
-        xlf_filename = xlf_url.rstrip("/").split("/")[-1].split("?")[0]
-        if not xlf_filename:
-            xlf_filename = "manual.xlf"
-        # Ensure it has .xlf extension
-        if not xlf_filename.lower().endswith((".xlf", ".xliff")):
-            xlf_filename += ".xlf"
 
-        xlf_path = input_dir / xlf_filename
-        _download_file(xlf_url, xlf_path, "XLIFF file")
+        if ext == ".pdf":
+            output_name = process_pdf(
+                input_path,
+                target_lang,
+                OUTPUT_DIR
+            )
 
-        # 3. Download and extract graphics ZIP (optional)
-        graphics_source_folder = None
-        if graphics_zip_url:
-            zip_filename = graphics_zip_url.rstrip("/").split("/")[-1].split("?")[0]
-            if not zip_filename:
-                zip_filename = "graphics.zip"
+        else:
+            output_name = process_image(
+                input_path,
+                target_lang,
+                OUTPUT_DIR
+            )
 
-            zip_save_path = input_dir / zip_filename
-            _download_file(graphics_zip_url, zip_save_path, "Graphics ZIP")
+        output_path = OUTPUT_DIR / output_name
 
-            graphics_source_folder = workspace_dir / "extracted_graphics"
-            graphics_source_folder.mkdir(exist_ok=True)
-
-            extract_zip_safely(zip_save_path, graphics_source_folder)
-
-        # 4. Import and execute the pipeline
-        from translate_xliff_openai_2 import translate_file as run_translation_pipeline
-
-        args = PipelineArgs(
-            batch_size=40,
-            dry_run=False,
-            resume=False,
-            graphics_source_folder=graphics_source_folder,
+        return FileResponse(
+            path=str(output_path),
+            filename=output_name,
+            media_type='application/octet-stream'
         )
 
-        output_root = output_dir / f"translated_{target_lang}"
-        output_root.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        return {"error": str(e)}
 
-        logger.info(f"Executing translation pipeline for {xlf_filename} -> {target_lang}")
 
-        success = run_translation_pipeline(
+@app.post("/translate-xliff")
+async def translate_xliff_endpoint(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    graphics_zip: UploadFile = File(...),
+    target_lang: str = Form(...),
+    dry_run: bool = Form(False)
+):
+    unique_id = uuid.uuid4().hex[:8]
+    session_dir = UPLOAD_DIR / unique_id
+    session_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Save uploaded XLIFF file
+    xlf_path = session_dir / file.filename
+    with open(xlf_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    # 2. Save uploaded Graphics ZIP
+    zip_path = session_dir / graphics_zip.filename
+    with open(zip_path, "wb") as buffer:
+        shutil.copyfileobj(graphics_zip.file, buffer)
+
+    # 3. Extract Graphics ZIP
+    graphics_src_dir = session_dir / "graphics_src"
+    graphics_src_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(graphics_src_dir)
+    except Exception as e:
+        shutil.rmtree(session_dir, ignore_errors=True)
+        return {"error": f"Failed to extract graphics zip: {str(e)}"}
+
+    # 4. Set up output root
+    xlf_name_without_ext = file.filename.replace('.xlf', '').replace('.xliff', '')
+    output_root = OUTPUT_DIR / unique_id / f"translated_{target_lang}_{xlf_name_without_ext}"
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    # 5. Run translation
+    import argparse
+    from translate_xliff_openai_2 import translate_file as run_translation
+    
+    translation_args = argparse.Namespace(
+        resume=False,
+        batch_size=40,
+        dry_run=dry_run,
+        graphics_source_folder=str(graphics_src_dir)
+    )
+
+    try:
+        from translate_xliff_openai_2 import MODEL as DEFAULT_MODEL
+        
+        success = run_translation(
             input_path=xlf_path,
             output_root=output_root,
             target_lang=target_lang,
-            args=args,
-            model_to_use="gpt-4o",
+            args=translation_args,
+            model_to_use=DEFAULT_MODEL
         )
-
+        
         if not success:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Translation pipeline execution failed.",
-            )
+            shutil.rmtree(session_dir, ignore_errors=True)
+            shutil.rmtree(OUTPUT_DIR / unique_id, ignore_errors=True)
+            return {"error": "Translation failed. Check backend logs."}
 
-        # 5. Pack the output directory into a standard deliverable ZIP archive
-        zip_path = output_dir / f"translated_{target_lang}.zip"
-        logger.info(f"Creating final deliverable ZIP archive at {zip_path}")
-
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for path in sorted(output_root.rglob("*")):
+        # 6. Create output ZIP containing the language-rooted folder prefix
+        zip_out_path = OUTPUT_DIR / f"{unique_id}_translated.zip"
+        zip_root = output_root
+        count = 0
+        with zipfile.ZipFile(zip_out_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for path in sorted(zip_root.rglob("*")):
                 if not path.is_file():
                     continue
-                rel = path.relative_to(output_root)
-                arcname = f"translated_{target_lang}/{rel.as_posix()}"
+                rel = path.relative_to(zip_root)
+                arcname = f"{output_root.name}/{rel.as_posix()}"
                 zf.write(path, arcname=arcname)
+                count += 1
 
-        if not zip_path.exists():
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to generate output ZIP deliverable.",
-            )
+        # Clean up temporary upload session directory
+        shutil.rmtree(session_dir, ignore_errors=True)
+        shutil.rmtree(OUTPUT_DIR / unique_id, ignore_errors=True)
 
-        # 6. Stream file response back to user
+        # Register cleanup of the zip file in background task
+        def cleanup_file(path: Path):
+            if path.exists():
+                try:
+                    path.unlink()
+                except Exception:
+                    pass
+
+        background_tasks.add_task(cleanup_file, zip_out_path)
+
         return FileResponse(
-            path=str(zip_path),
-            filename=f"translated_{target_lang}.zip",
-            media_type="application/zip",
+            path=str(zip_out_path),
+            filename=f"translated_{target_lang}_{file.filename.replace('.xlf', '').replace('.xliff', '')}.zip",
+            media_type='application/zip'
         )
 
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.exception("An unhandled exception occurred during translation pipeline:")
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"error": str(e)},
-        )
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  ENDPOINT 2: Direct file upload (for Postman / curl / direct API testing)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@app.post("/translate/upload")
-async def translate_via_upload(
-    background_tasks: BackgroundTasks,
-    target_lang: str = Query(..., description="Target ISO language code"),
-    file: UploadFile = File(..., description="The FrameMaker XLIFF file (.xlf or .xliff)"),
-    graphics_zip: Optional[UploadFile] = File(None, description="ZIP archive of source graphics"),
-    credentials: str = Depends(verify_token),
-):
-    """
-    Direct multipart/form-data file upload endpoint for testing via
-    curl, Postman, or any HTTP client that supports binary uploads.
-    """
-    from translate_xliff_openai_2 import LANGUAGES
-
-    ext = Path(file.filename).suffix.lower()
-    if ext not in [".xlf", ".xliff"]:
-        raise HTTPException(status_code=400, detail="Expected .xlf or .xliff file")
-
-    if target_lang not in LANGUAGES:
-        raise HTTPException(status_code=400, detail=f"Unsupported language. Supported: {', '.join(LANGUAGES.keys())}")
-
-    request_id = str(uuid.uuid4())
-    workspace_dir = Path("workspaces") / request_id
-    input_dir = workspace_dir / "input"
-    output_dir = workspace_dir / "output"
-    input_dir.mkdir(parents=True, exist_ok=True)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    background_tasks.add_task(cleanup_workspace, workspace_dir)
-
-    try:
-        xlf_path = input_dir / file.filename
-        with open(xlf_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-
-        graphics_source_folder = None
-        if graphics_zip:
-            zip_save_path = input_dir / graphics_zip.filename
-            with open(zip_save_path, "wb") as buffer:
-                shutil.copyfileobj(graphics_zip.file, buffer)
-            graphics_source_folder = workspace_dir / "extracted_graphics"
-            graphics_source_folder.mkdir(exist_ok=True)
-            extract_zip_safely(zip_save_path, graphics_source_folder)
-
-        from translate_xliff_openai_2 import translate_file as run_translation_pipeline
-        args = PipelineArgs(batch_size=40, dry_run=False, resume=False, graphics_source_folder=graphics_source_folder)
-        output_root = output_dir / f"translated_{target_lang}"
-        output_root.mkdir(parents=True, exist_ok=True)
-
-        success = run_translation_pipeline(
-            input_path=xlf_path, output_root=output_root,
-            target_lang=target_lang, args=args, model_to_use="gpt-4o",
-        )
-        if not success:
-            raise HTTPException(status_code=500, detail="Pipeline failed.")
-
-        zip_path = output_dir / f"translated_{target_lang}.zip"
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for path in sorted(output_root.rglob("*")):
-                if not path.is_file():
-                    continue
-                rel = path.relative_to(output_root)
-                arcname = f"translated_{target_lang}/{rel.as_posix()}"
-                zf.write(path, arcname=arcname)
-
-        return FileResponse(path=str(zip_path), filename=f"translated_{target_lang}.zip", media_type="application/zip")
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Upload endpoint error:")
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        shutil.rmtree(session_dir, ignore_errors=True)
+        shutil.rmtree(output_root, ignore_errors=True)
+        return {"error": f"Internal error during translation: {str(e)}"}

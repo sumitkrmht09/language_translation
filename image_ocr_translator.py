@@ -1,16 +1,4 @@
 # image_ocr_translator.py
-import sys
-if hasattr(sys.stdout, "reconfigure"):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
-if hasattr(sys.stderr, "reconfigure"):
-    try:
-        sys.stderr.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
-
 import os
 import re
 import io
@@ -38,9 +26,9 @@ except ImportError:
     _LANGDETECT_AVAILABLE = False
     print("[WARN] langdetect not installed — pip install langdetect")
 
-# -----------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
 # Config
-# -----------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
 import os
 from dotenv import load_dotenv
 
@@ -58,9 +46,9 @@ MIN_FONT       = 7
 MAX_FONT       = 96
 _MIN_CHARS_FOR_LANGDETECT = 20
 
-# -----------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
 # Language maps
-# -----------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
 
 LANG_NAMES: Dict[str, str] = {
     "zh-CN": "Simplified Chinese",   "zh-TW": "Traditional Chinese",
@@ -82,8 +70,8 @@ _LANG_ROOT: Dict[str, str] = {
     "nb":    "no",    "pt-BR": "pt",
 }
 
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff", ".eps", ".svg", ".wmf", ".emf"}
-PDF_EXTENSIONS   = {".pdf", ".pd"}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff"}
+PDF_EXTENSIONS   = {".pdf"}
 MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | PDF_EXTENSIONS
 
 
@@ -329,7 +317,7 @@ def _ocr_translate(b64_image: str, target_lang: str,
             timeout=API_TIMEOUT,
         )
     except Exception as e:
-        print(f"      [FAIL] API failed: {e}")
+        print(f"      ✗ API failed: {e}")
         return []
 
     raw = response.choices[0].message.content.strip()
@@ -337,10 +325,10 @@ def _ocr_translate(b64_image: str, target_lang: str,
         raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
     try:
         result = json.loads(raw)
-        print(f"      [OK] {len(result)} block(s) detected")
+        print(f"      ✓ {len(result)} block(s) detected")
         return result
     except Exception:
-        print(f"      [FAIL] JSON parse failed:\n{raw[:300]}")
+        print(f"      ✗ JSON parse failed:\n{raw[:300]}")
         return []
 
 def _translate_texts_batch(texts: List[str], target_lang: str) -> List[str]:
@@ -376,7 +364,7 @@ def _translate_texts_batch(texts: List[str], target_lang: str) -> List[str]:
             out.append(matched if matched else original)
         return out
     except Exception as e:
-        print(f"      [FAIL] batch translate error: {e}")
+        print(f"      ✗ batch translate error: {e}")
         return texts
 
 try:
@@ -681,9 +669,9 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
         )
         if rc >= 0:
             any_changed = True
-            print(f"      [OK] {repr(span['text'][:28])} → {repr(translated[:28])}")
+            print(f"      ✓ {repr(span['text'][:28])} → {repr(translated[:28])}")
         else:
-            print(f"      [FAIL] insert_text rc={rc} for {repr(span['text'][:28])}")
+            print(f"      ✗ insert_text rc={rc} for {repr(span['text'][:28])}")
 
     return any_changed
 
@@ -728,7 +716,7 @@ def process_image(
     try:
         pil_img = Image.open(str(source_path)).convert("RGB")
     except Exception as e:
-        print(f"  [FAIL] Cannot open image: {e}")
+        print(f"  ✗ Cannot open image: {e}")
         return ""
 
     pil_img      = _cap_image(pil_img)        
@@ -761,7 +749,7 @@ def process_image(
     if save_fmt == "JPEG":
         kw["quality"] = 95
     pil_img.save(str(out_path), **kw)
-    print(f"  [OK] Saved → {new_name}")
+    print(f"  ✓ Saved → {new_name}")
     return new_name
 
 def process_pdf(
@@ -776,7 +764,7 @@ def process_pdf(
     try:
         doc = fitz.open(str(source_path))
     except Exception as e:
-        print(f"  [FAIL] Cannot open PDF: {e}")
+        print(f"  ✗ Cannot open PDF: {e}")
         return ""
 
     new_name = (
@@ -790,7 +778,7 @@ def process_pdf(
         print("  - Document already in target language — copying unchanged.")
         doc.close()
         shutil.copy2(str(source_path), str(out_path))
-        print(f"  [OK] Copied → {new_name}")
+        print(f"  ✓ Copied → {new_name}")
         return new_name
 
     if not full_text.strip():
@@ -802,11 +790,11 @@ def process_pdf(
         print(f"      page {idx+1}/{len(doc)}", flush=True)
         if _has_real_text(page):
             changed = _process_text_layer_page(page, target_lang)
-            print(f"      {'[OK]' if changed else '-'} "
+            print(f"      {'✓' if changed else '-'} "
                   f"{'text-layer translated' if changed else 'text-layer: no changes'}")
         else:
             changed = _process_image_layer_page(doc, page, target_lang)
-            print(f"      {'[OK]' if changed else '-'} "
+            print(f"      {'✓' if changed else '-'} "
                   f"{'image-OCR translated' if changed else 'image-OCR: no text'}")
         if changed:
             any_changed = True
@@ -815,14 +803,14 @@ def process_pdf(
         print("  - Nothing translated — copying unchanged.")
         doc.close()
         shutil.copy2(str(source_path), str(out_path))
-        print(f"  [OK] Copied → {new_name}")
+        print(f"  ✓ Copied → {new_name}")
         return new_name
 
     tmp = str(out_path) + ".tmp.pdf"
     doc.save(tmp, garbage=4, deflate=True)
     doc.close()
     os.replace(tmp, str(out_path))
-    print(f"  [OK] Saved → {new_name}")
+    print(f"  ✓ Saved → {new_name}")
     return new_name
 
 _DI_RE = re.compile(
@@ -836,10 +824,8 @@ _OB_RE = re.compile(
 )
 
 def _parse_mif_path(raw_di: str) -> str:
-    first = html.unescape(raw_di.strip())
-    second = html.unescape(first)
-    unquoted = unquote(second)
-    converted = unquoted.replace("<u>", "../").replace("<c>", "/")
+    decoded   = html.unescape(raw_di.strip())
+    converted = decoded.replace("<u>", "../").replace("<c>", "/")
     converted = converted.replace("..//" , "../")   
     return converted
 
@@ -848,7 +834,7 @@ def _decode_internal_file_blob(xlf_path: Path) -> str:
     try:
         tree = etree.parse(str(xlf_path), parser)
     except Exception as e:
-        print(f"  [FAIL] Cannot parse XLF: {e}")
+        print(f"  ✗ Cannot parse XLF: {e}")
         return ""
 
     internal_el = None
@@ -869,140 +855,57 @@ def _decode_internal_file_blob(xlf_path: Path) -> str:
     try:
         compressed = base64.b64decode(raw_b64)
     except Exception as e:
-        print(f"  [FAIL] base64 decode failed: {e}")
+        print(f"  ✗ base64 decode failed: {e}")
         return ""
 
     if compressed[:2] == b'\x1f\x8b':
         try:
             return gzip.decompress(compressed).decode("utf-8", errors="replace")
         except Exception as e:
-            print(f"  [FAIL] gzip decompress failed: {e}")
+            print(f"  ✗ gzip decompress failed: {e}")
             return ""
 
     return compressed.decode("utf-8", errors="replace")
 
 def extract_reference_paths(xlf_path: Path) -> List[Tuple[str, str]]:
-    xlf_path = Path(xlf_path)
-    base_dir = xlf_path.parent
-
-    parser = etree.XMLParser(remove_blank_text=False, recover=True)
-    try:
-        tree = etree.parse(str(xlf_path), parser)
-    except Exception as e:
-        print(f"  [FAIL] Cannot parse XLF: {e}")
+    print(f"  Decoding internal-file blob in: {xlf_path.name}", flush=True)
+    mif = _decode_internal_file_blob(xlf_path)
+    if not mif:
+        print("  ✗ Could not decode internal-file blob — no refs extracted.")
         return []
 
-    root = tree.getroot()
-    seen: set = set()
+    base_dir = xlf_path.parent
+    di_raws  = _DI_RE.findall(mif)
+
+    print(f"  ImportObFileDI entries found: {len(di_raws)}")
+    if not di_raws:
+        print("  [WARN] No <ImportObFileDI> entries in MIF.")
+        return []
+
+    seen:   set                    = set()
     result: List[Tuple[str, str]] = []
 
-    def add_ref(raw_val: str, ref_type: str):
-        fs_path_str = _parse_mif_path(raw_val)
-        if fs_path_str == "2.0 internal inset" or not fs_path_str.strip():
-            return
-            
-        ext = Path(fs_path_str).suffix.lower()
-        if not ext:
-            return
+    for raw in di_raws:
+        fs_path_str = _parse_mif_path(raw)
+        ext         = Path(fs_path_str).suffix.lower()
+
+        if ext not in MEDIA_EXTENSIONS:
+            print(f"    skip (unsupported ext '{ext}'): {fs_path_str!r}")
+            continue
 
         abs_path = (base_dir / fs_path_str).resolve()
-        key = str(abs_path)
+        key      = str(abs_path)
 
         if key in seen:
-            return
+            continue
         seen.add(key)
 
-        print(f"    [{ref_type}] Raw ref : {raw_val!r}")
-        print(f"    [{ref_type}] FS path: {fs_path_str!r}")
-        print(f"    [{ref_type}] Abs    : {abs_path}")
-        result.append((raw_val, str(abs_path)))
-
-    # 1. Scan all <internal-file> tags
-    internal_elements = []
-    for elem in root.iter():
-        tag_local = elem.tag.split("}")[-1]
-        if tag_local == "internal-file":
-            internal_elements.append(elem)
-
-    print(f"  Total <internal-file> tags found: {len(internal_elements)}")
-    for idx, elem in enumerate(internal_elements):
-        raw_b64 = (elem.text or "").strip()
-        if not raw_b64:
-            continue
-        try:
-            compressed = base64.b64decode(raw_b64)
-            if compressed[:2] == b'\x1f\x8b':
-                mif = gzip.decompress(compressed).decode("utf-8", errors="replace")
-            else:
-                mif = compressed.decode("utf-8", errors="replace")
-            
-            di_raws = _DI_RE.findall(mif)
-            ob_matches = _OB_RE.findall(mif)
-            ob_raws = [match[1] for match in ob_matches]
-            
-            print(f"    [internal-file {idx}] ImportObFileDI found: {len(di_raws)}, ImportObFile found: {len(ob_raws)}")
-            for raw in di_raws:
-                add_ref(raw, f"DI-IF-{idx}")
-            for raw in ob_raws:
-                add_ref(raw, f"OB-IF-{idx}")
-        except Exception as e:
-            print(f"    [FAIL] Error decoding/parsing internal-file {idx}: {e}")
-
-    # 2. Scan all <file> tags and check the 'original' attribute
-    file_elements = []
-    for elem in root.iter():
-        tag_local = elem.tag.split("}")[-1]
-        if tag_local == "file":
-            file_elements.append(elem)
-
-    print(f"  Total <file> tags found: {len(file_elements)}")
-    for idx, elem in enumerate(file_elements):
-        original = elem.get("original")
-        if original:
-            original_clean = original.strip()
-            ext = Path(original_clean).suffix.lower()
-            if ext in MEDIA_EXTENSIONS or ext == ".pd":
-                print(f"    [file {idx}] Found graphic reference in 'original' attribute: {original_clean}")
-                add_ref(original_clean, f"FILE-ATTR-{idx}")
-
-    # 3. Scan all <external-file> tags and check the 'href' attribute
-    external_elements = []
-    for elem in root.iter():
-        tag_local = elem.tag.split("}")[-1]
-        if tag_local == "external-file":
-            external_elements.append(elem)
-
-    print(f"  Total <external-file> tags found: {len(external_elements)}")
-    for idx, elem in enumerate(external_elements):
-        href = elem.get("href")
-        if href:
-            href_clean = href.strip()
-            ext = Path(href_clean).suffix.lower()
-            if ext in MEDIA_EXTENSIONS or ext == ".pd":
-                print(f"    [external-file {idx}] Found graphic reference in 'href' attribute: {href_clean}")
-                add_ref(href_clean, f"EXT-HREF-{idx}")
-
-    # 4. Scan any other element with 'href' attribute ending in a media extension
-    for elem in root.iter():
-        tag_local = elem.tag.split("}")[-1]
-        if tag_local == "external-file":
-            continue
-        href = elem.get("href")
-        if href:
-            href_clean = href.strip()
-            ext = Path(href_clean).suffix.lower()
-            if ext in MEDIA_EXTENSIONS or ext == ".pd":
-                print(f"    [<{tag_local}>] Found graphic reference in 'href' attribute: {href_clean}")
-                add_ref(href_clean, f"HREF-{tag_local}")
+        print(f"    DI raw : {raw!r}")
+        print(f"    FS path: {fs_path_str!r}")
+        print(f"    Abs    : {abs_path}")
+        result.append((raw, str(abs_path)))
 
     return result
-
-def _to_di_path(fs_path: str) -> str:
-    # Convert standard relative path to device-independent path
-    # Replace '../' with '<u>' and '/' with '<c>'
-    di = fs_path.replace("../", "<u>").replace("/", "<c>").replace("\\", "<c>")
-    import html
-    return html.escape(di)
 
 def _update_mif_blob(mif_text: str, mapping: Dict[str, str]) -> Tuple[str, int]:
     result  = []
@@ -1032,24 +935,11 @@ def _update_mif_blob(mif_text: str, mapping: Dict[str, str]) -> Tuple[str, int]:
         if old_val == "2.0 internal inset":
             continue          
 
-        # Reconstruct the string, updating BOTH ImportObFileDI and ImportObFile
-        result.append(mif_text[pos : di_match.start(1)])
-        
-        # 1. Update ImportObFileDI to device-independent format
-        new_di_path = _to_di_path(new_path)
-        result.append(new_di_path)
-        
-        # 2. Add text between ImportObFileDI end and ImportObFile start
-        result.append(mif_text[di_match.end(1) : ob_match.start(2)])
-        
-        # 3. Update ImportObFile to platform-specific format (with backslashes for local compatibility)
-        win_path = new_path.replace("/", "\\")
-        result.append(win_path)
-        
+        result.append(mif_text[pos : ob_match.start(2)])
+        result.append(new_path)
         pos = ob_match.end(2)
         updated += 1
-        print(f"    MIF DI: {decoded!r}  →  {new_di_path!r}")
-        print(f"    MIF OB: {old_val!r}  →  {win_path!r}")
+        print(f"    MIF: {old_val!r}  →  {new_path!r}")
 
     result.append(mif_text[pos:])
     return "".join(result), updated
@@ -1063,163 +953,81 @@ def _rebuild_xlf_with_updated_paths(
     try:
         tree = etree.parse(str(xlf_path), parser)
     except Exception as e:
-        print(f"  [FAIL] Cannot parse XLF for rebuild: {e}")
+        print(f"  ✗ Cannot parse XLF for rebuild: {e}")
         return False
 
-    root = tree.getroot()
-
-    # 1. Update <file> tags original attribute
-    for elem in root.iter():
-        tag_local = elem.tag.split("}")[-1]
-        if tag_local == "file":
-            original = elem.get("original")
-            if original:
-                original_clean = original.strip()
-                fs_path_str = _parse_mif_path(original_clean)
-                basename = Path(fs_path_str).name
-                new_path = (
-                    mapping.get(original_clean) or
-                    mapping.get(basename) or
-                    mapping.get(fs_path_str)
-                )
-                if new_path:
-                    win_path = new_path.replace("/", "\\")
-                    elem.set("original", win_path)
-                    print(f"    XML <file> original: {original_clean!r} → {win_path!r}")
-
-    # 2. Update <external-file> tags href attribute
-    for elem in root.iter():
-        tag_local = elem.tag.split("}")[-1]
-        if tag_local == "external-file":
-            href = elem.get("href")
-            if href:
-                href_clean = href.strip()
-                fs_path_str = _parse_mif_path(href_clean)
-                basename = Path(fs_path_str).name
-                new_path = (
-                    mapping.get(href_clean) or
-                    mapping.get(basename) or
-                    mapping.get(fs_path_str)
-                )
-                if new_path:
-                    win_path = new_path.replace("/", "\\")
-                    elem.set("href", win_path)
-                    print(f"    XML <external-file> href: {href_clean!r} → {win_path!r}")
-
-    # 3. Update any other element with href attribute ending in media extension
-    for elem in root.iter():
-        tag_local = elem.tag.split("}")[-1]
-        if tag_local == "external-file":
-            continue
-        href = elem.get("href")
-        if href:
-            href_clean = href.strip()
-            fs_path_str = _parse_mif_path(href_clean)
-            basename = Path(fs_path_str).name
-            new_path = (
-                mapping.get(href_clean) or
-                mapping.get(basename) or
-                mapping.get(fs_path_str)
-            )
-            if new_path:
-                win_path = new_path.replace("/", "\\")
-                elem.set("href", win_path)
-                print(f"    XML <{tag_local}> href: {href_clean!r} → {win_path!r}")
-
-    # 4. Update <internal-file> tags (MIF blob)
     internal_el = None
-    for elem in root.iter():
+    for elem in tree.getroot().iter():
         if elem.tag.split("}")[-1] == "internal-file":
             internal_el = elem
             break
 
-    n_updated = 0
-    if internal_el is not None:
-        raw_b64 = (internal_el.text or "").strip()
-        if raw_b64:
-            try:
-                compressed = base64.b64decode(raw_b64)
-                if compressed[:2] == b'\x1f\x8b':
-                    mif_text = gzip.decompress(compressed).decode("utf-8", errors="replace")
-                else:
-                    mif_text = compressed.decode("utf-8", errors="replace")
-                
-                print("\n  Rewriting <ImportObFile> & <ImportObFileDI> paths in MIF blob …")
-                updated_mif, n_updated = _update_mif_blob(mif_text, mapping)
-                
-                if n_updated > 0:
-                    new_compressed = gzip.compress(updated_mif.encode("utf-8"))
-                    internal_el.text = base64.b64encode(new_compressed).decode("ascii")
-            except Exception as e:
-                print(f"  [FAIL] Internal MIF blob update failed: {e}")
+    if internal_el is None:
+        print("  ✗ No <internal-file> element found — cannot update XLF.")
+        return False
+
+    raw_b64 = (internal_el.text or "").strip()
+    if not raw_b64:
+        print("  ✗ <internal-file> is empty.")
+        return False
+
+    try:
+        compressed = base64.b64decode(raw_b64)
+        mif_text   = gzip.decompress(compressed).decode("utf-8", errors="replace")
+    except Exception as e:
+        print(f"  ✗ Blob decode failed: {e}")
+        return False
+
+    print("\n  Rewriting <ImportObFile> paths in MIF blob …")
+    updated_mif, n_updated = _update_mif_blob(mif_text, mapping)
+
+    if n_updated == 0:
+        print("  [WARN] No <ImportObFile> entries were updated.")
+        print("         Check that the mapping keys match what is in the MIF.")
+        print("         Mapping keys:", list(mapping.keys())[:6])
+
+    new_compressed        = gzip.compress(updated_mif.encode("utf-8"))
+    internal_el.text      = base64.b64encode(new_compressed).decode("ascii")
 
     out_xlf_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        tree.write(
-            str(out_xlf_path),
-            xml_declaration=True,
-            encoding="UTF-8",
-            pretty_print=False,
-        )
-        print(f"  [OK] Updated XLF saved → {out_xlf_path}")
-        print(f"    ({n_updated} graphic reference(s) rewritten in MIF blob)")
-        return True
-    except Exception as e:
-        print(f"  [FAIL] Failed to write updated XML tree to {out_xlf_path}: {e}")
-        return False
+    tree.write(
+        str(out_xlf_path),
+        xml_declaration=True,
+        encoding="UTF-8",
+        pretty_print=False,
+    )
+    print(f"  ✓ Updated XLF saved → {out_xlf_path}")
+    print(f"    ({n_updated} graphic reference(s) rewritten)")
+    return True
 
 def _subfolder_from_di(di_fs_path: str) -> Path:
     p = Path(di_fs_path)
     parts = p.parent.parts
     
-    # 1. Search for any part starting with "translated_" (case-insensitive)
-    translated_idx = -1
-    for idx, part in enumerate(parts):
-        if part.lower().startswith("translated_"):
-            translated_idx = idx
+    idx = -1
+    for i, part in enumerate(parts):
+        if part.lower() == 'graphics':
+            idx = i
+            break
             
-    if translated_idx != -1:
-        # Keep everything after the "translated_..." part
-        real_parts = parts[translated_idx + 1:]
+    if idx != -1:
+        real_parts = parts[idx:]
     else:
-        # 2. Search for common media/graphics folder names (case-insensitive)
-        media_prefixes = ("graphics", "image", "img", "media", "pic", "photo", "draw")
-        media_idx = -1
-        for idx, part in enumerate(parts):
-            if any(part.lower().startswith(prefix) for prefix in media_prefixes):
-                media_idx = idx
-                break  # Take the first one to preserve nested structure
-                
-        if media_idx != -1:
-            real_parts = parts[media_idx:]
-        else:
-            # 3. Fallback for absolute paths: if absolute, only take the last directory
-            # to avoid leak/creation of full system path structure (e.g. Users/Lenovo/...)
-            is_abs = (
-                p.is_absolute() 
-                or di_fs_path.startswith('/') 
-                or di_fs_path.startswith('\\') 
-                or any(':' in part for part in parts)
-            )
-            if is_abs:
-                skip = {'..', '.', '', '/', '\\'}
-                last_part = parts[-1] if parts else ''
-                if last_part and last_part not in skip and not (len(last_part) == 3 and last_part[1] == ':'):
-                    real_parts = [last_part]
-                else:
-                    real_parts = []
-            else:
-                # For standard relative paths, just clean up .. and .
-                skip = {'..', '.', '', '/', '\\'}
-                real_parts = [
-                    part for part in parts
-                    if part not in skip
-                    and not (len(part) == 3 and part[1] == ':')
-                ]
-                
+        skip = {'..', '.', '', '/', '\\'}
+        real_parts = []
+        for part in parts:
+            if part in skip:
+                continue
+            if len(part) == 3 and part[1] == ':':
+                continue
+            if part.lower() in {'users', 'lenovo', 'downloads', 'desktop'}:
+                continue
+            real_parts.append(part)
+            
     if not real_parts:
         return Path('.')
     return Path(*real_parts)
+
 
 def process_xlf_references(
     xlf_path,
@@ -1261,11 +1069,6 @@ def process_xlf_references(
 
     mapping: Dict[str, str] = {}
 
-    # Dashboard Tracking Metadata
-    details = []
-    fulfilled_count = 0
-    missing_count = 0
-
     for di_raw, abs_path_str in refs:
         abs_path = Path(abs_path_str)
         di_fs    = _parse_mif_path(di_raw)      
@@ -1277,212 +1080,77 @@ def process_xlf_references(
         if src_graphics_folder:
             src_g_root = Path(src_graphics_folder)
             sub = _subfolder_from_di(di_fs)
-            import unicodedata
-            target_norm = unicodedata.normalize('NFC', abs_path.name.lower())
-            target_pdf = target_norm + "f" if target_norm.endswith(".pd") else None
+            if sub.parts and sub.parts[0].lower() == 'graphics':
+                if len(sub.parts) > 1:
+                    sub = Path(*sub.parts[1:])
+                else:
+                    sub = Path('.')
             
-            def matches_target(name: str) -> bool:
-                norm_name = unicodedata.normalize('NFC', name.lower())
-                return norm_name == target_norm or (target_pdf is not None and norm_name == target_pdf)
-
-            # Check 1: Structure match (Graphics/Graphics/image.pdf) with case-insensitivity, normalization & extension fallback
-            c1_dir = src_g_root / sub
-            if c1_dir.is_dir():
-                for item in c1_dir.iterdir():
-                    if item.is_file() and matches_target(item.name):
-                        found_src_path = item
-                        break
-            
-            if not found_src_path:
-                # Check 2: Direct match inside root with case-insensitivity, normalization & extension fallback
-                if src_g_root.is_dir():
-                    for item in src_g_root.iterdir():
-                        if item.is_file() and matches_target(item.name):
-                            found_src_path = item
+            # Check 1: Structure match (Graphics/Graphics/image.pdf)
+            c1 = src_g_root / sub / abs_path.name
+            if c1.is_file():
+                found_src_path = c1
+            else:
+                # Check 2: Direct match inside root
+                c2 = src_g_root / abs_path.name
+                if c2.is_file():
+                    found_src_path = c2
+                else:
+                    # Check 3: Scan anywhere inside the uploaded directory structure
+                    for match in src_g_root.rglob(abs_path.name):
+                        if match.is_file():
+                            found_src_path = match
                             break
-            
-            if not found_src_path:
-                # Check 3: Scan anywhere inside the uploaded directory structure with case-insensitivity, normalization & extension fallback
-                if src_g_root.is_dir():
-                    for item in src_g_root.rglob("*"):
-                        if item.is_file() and matches_target(item.name):
-                            found_src_path = item
-                            break
-
-            # STEM FALLBACK: If still not found, try matching by stem (base name without extension)
-            if not found_src_path:
-                target_stem = unicodedata.normalize('NFC', abs_path.stem.lower())
-                
-                def matches_target_stem(name: str) -> bool:
-                    p_item = Path(name)
-                    norm_stem = unicodedata.normalize('NFC', p_item.stem.lower())
-                    return norm_stem == target_stem and p_item.suffix.lower() in (MEDIA_EXTENSIONS | {".pd"})
-
-                # Check 4: Structure match with stem only
-                if c1_dir.is_dir():
-                    for item in c1_dir.iterdir():
-                        if item.is_file() and matches_target_stem(item.name):
-                            found_src_path = item
-                            break
-
-                if not found_src_path:
-                    # Check 5: Direct match inside root with stem only
-                    if src_g_root.is_dir():
-                        for item in src_g_root.iterdir():
-                            if item.is_file() and matches_target_stem(item.name):
-                                found_src_path = item
-                                break
-
-                if not found_src_path:
-                    # Check 6: Scan anywhere inside uploaded directory structure with stem only
-                    if src_g_root.is_dir():
-                        for item in src_g_root.rglob("*"):
-                            if item.is_file() and matches_target_stem(item.name):
-                                found_src_path = item
-                                break
 
         if not found_src_path:
-            print(f"  [MISSING] Image file not found inside uploaded folder hierarchy: {abs_path.name}")
-            missing_count += 1
-            details.append({
-                "raw_reference": di_raw,
-                "parsed_path": di_fs,
-                "status": "Missing",
-                "source_file": None,
-                "output_path": None,
-                "action": "None"
-            })
+            print(f"  ✗ Image file not found inside uploaded folder hierarchy: {abs_path.name}")
             continue
 
-        print(f"  [OK] Located image in uploaded Graphics folder -> {found_src_path}")
-        orig_name = abs_path.name
+        print(f"  ✓ Located image in uploaded Graphics folder -> {found_src_path}")
         abs_path = found_src_path
 
         sub = _subfolder_from_di(di_fs)
-        
-        # If the reference subfolder has no media prefix or is empty/root, override it with the
-        # folder structure from the uploaded ZIP. This avoids leaking absolute system folders (like BadFileName).
-        has_media_prefix = any(p in str(sub).lower() for p in ("graphics", "image", "img", "media", "pic", "photo", "draw"))
-        if (sub == Path('.') or not has_media_prefix) and found_src_path and src_graphics_folder:
-            try:
-                rel_found = found_src_path.relative_to(src_graphics_folder)
-                sub_found = _subfolder_from_di(str(rel_found))
-                if sub_found != sub:
-                    sub = sub_found
-                    print(f"  [PATH] Overrode non-media/empty reference subfolder with ZIP structure: {sub}")
-            except Exception as e:
-                print(f"  [PATH] Failed to get relative path of found file: {e}")
-
+        if sub.parts and sub.parts[0].lower() == 'graphics':
+            if len(sub.parts) > 1:
+                sub = Path(*sub.parts[1:])
+            else:
+                sub = Path('.')
         dest_folder = out_folder / sub
         dest_folder.mkdir(parents=True, exist_ok=True)
 
         ext = abs_path.suffix.lower()
-        new_name = None
-        action_taken = "None"
         try:
             if ext in IMAGE_EXTENSIONS:
-                try:
-                    new_name = process_image(
-                        abs_path, target_lang, dest_folder,
-                        rename_with_lang=rename_with_lang,
-                    )
-                    action_taken = "Translated (Image)"
-                except Exception as e:
-                    print(f"  [WARN] process_image failed ({e}) -- falling back to copy")
+                new_name = process_image(
+                    abs_path, target_lang, dest_folder,
+                    rename_with_lang=rename_with_lang,
+                )
             elif ext in PDF_EXTENSIONS:
-                try:
-                    new_name = process_pdf(
-                        abs_path, target_lang, dest_folder,
-                        rename_with_lang=rename_with_lang,
-                    )
-                    action_taken = "Translated (PDF)"
-                except Exception as e:
-                    print(f"  [WARN] process_pdf failed ({e}) -- falling back to copy")
-            
+                new_name = process_pdf(
+                    abs_path, target_lang, dest_folder,
+                    rename_with_lang=rename_with_lang,
+                )
+            else:
+                print(f"  - Unsupported extension {ext} — skipping.")
+                continue
+
             if not new_name:
-                print(f"  - Blindly copying fallback/unknown extension file: {abs_path.name}")
-                new_name = abs_path.name
-                shutil.copy2(str(abs_path), str(dest_folder / new_name))
-                action_taken = "Copied (Fallback)"
+                continue
 
             saved_abs = dest_folder / new_name
-            final_abs = dest_folder / orig_name
-            source_abs = dest_folder / abs_path.name
 
-            # Ensure the final reference path is written
-            if saved_abs.exists() and saved_abs != final_abs:
-                if final_abs.exists():
-                    final_abs.unlink()
-                shutil.copy2(str(saved_abs), str(final_abs))
-                print(f"  [COPY] Copied to final reference path: {final_abs.name}")
-
-            # Ensure the source filename is also written to preserve the extension/name from the ZIP
-            if saved_abs.exists() and saved_abs != source_abs:
-                if source_abs.exists():
-                    source_abs.unlink()
-                shutil.copy2(str(saved_abs), str(source_abs))
-                print(f"  [COPY] Preserved source filename: {source_abs.name}")
-
-            # Set saved_abs to final_abs so that the relpath calculations below use the final reference path
-            saved_abs = final_abs
-
-            # Calculated exact relative path from nested XLIFF folder out to Graphics folder
+            # Calculated relative path from translated XLIFF/MIF directory to Graphics file
             mif_ref = os.path.relpath(str(saved_abs), str(xlf_out_dir)).replace(os.sep, "/")
 
-            print(f"  Saved  -> {saved_abs}")
+            print(f"  Saved  → {saved_abs}")
             print(f"  MIF ref: {mif_ref!r}")
 
             mapping[abs_path.name]   = mif_ref   
             mapping[di_fs]           = mif_ref   
             mapping[di_raw]          = mif_ref   
 
-            fulfilled_count += 1
-            try:
-                rel_src = str(found_src_path.relative_to(src_graphics_folder)) if src_graphics_folder else found_src_path.name
-            except ValueError:
-                rel_src = found_src_path.name
-            
-            relative_output_path = os.path.relpath(str(saved_abs), str(out_folder)).replace(os.sep, "/")
-            details.append({
-                "raw_reference": di_raw,
-                "parsed_path": di_fs,
-                "status": "Fulfilled",
-                "source_file": rel_src,
-                "output_path": relative_output_path,
-                "action": action_taken
-            })
-
         except Exception as e:
-            print(f"  [ERROR] Error on {abs_path.name}: {e}")
-
-    # Write dashboard metadata JSON file
-    import json
-    metadata = {
-        "total_references": len(refs),
-        "fulfilled_count": fulfilled_count,
-        "missing_count": missing_count,
-        "details": details
-    }
-    metadata_path = out_folder / "translation_metadata.json"
-    try:
-        with open(metadata_path, "w", encoding="utf-8") as f:
-            json.dump(metadata, f, indent=2, ensure_ascii=False)
-        print(f"  [OK] Saved translation metadata to: {metadata_path}")
-    except Exception as e:
-        print(f"  [WARN] Failed to write translation metadata: {e}")
-
-    # Rebuild the translated XLIFF with updated paths if out_xlf_path is provided
-    if out_xlf_path and mapping:
-        src_xlf = out_xlf_path if out_xlf_path.exists() else xlf_path
-        print(f"\n  Rebuilding XLIFF with updated graphic paths -> {out_xlf_path}")
-        try:
-            _rebuild_xlf_with_updated_paths(
-                xlf_path=src_xlf,
-                mapping=mapping,
-                out_xlf_path=out_xlf_path
-            )
-        except Exception as e:
-            print(f"  [ERROR] Failed to rebuild XLIFF: {e}")
+            print(f"  ✗ Error on {abs_path.name}: {e}")
 
     print(f"\n{'='*60}")
     print(f"  Done. {len(set(mapping.values()))}/{len(refs)} file(s) translated.")
