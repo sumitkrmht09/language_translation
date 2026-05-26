@@ -181,6 +181,18 @@ with st.container():
         help="Specify the root URL of your deployed FastAPI service."
     )
     
+    if backend_url:
+        try:
+            resp = httpx.get(backend_url.rstrip("/"), timeout=5.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                commit = data.get("commit", "Pre-commit-diagnostics")
+                st.caption(f"🟢 Connected to API backend. Version/Commit: `{commit}`")
+            else:
+                st.caption(f"🔴 Connected to API backend, but returned status code {resp.status_code}")
+        except Exception as e:
+            st.caption(f"🔴 Could not connect to API backend: {e}")
+
     api_key = st.text_input(
         "API Secret Key (Bearer Token)",
         value=env_secret_key,
