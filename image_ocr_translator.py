@@ -878,34 +878,42 @@ def extract_reference_paths(xlf_path: Path) -> List[Tuple[str, str]]:
 
     base_dir = xlf_path.parent
     di_raws  = _DI_RE.findall(mif)
+    ob_matches = _OB_RE.findall(mif)
+    ob_raws  = [match[1] for match in ob_matches]
 
     print(f"  ImportObFileDI entries found: {len(di_raws)}")
-    if not di_raws:
-        print("  [WARN] No <ImportObFileDI> entries in MIF.")
-        return []
+    print(f"  ImportObFile entries found: {len(ob_raws)}")
 
     seen:   set                    = set()
     result: List[Tuple[str, str]] = []
 
-    for raw in di_raws:
-        fs_path_str = _parse_mif_path(raw)
-        ext         = Path(fs_path_str).suffix.lower()
-
+    def add_ref(raw_val: str, ref_type: str):
+        fs_path_str = _parse_mif_path(raw_val)
+        if fs_path_str == "2.0 internal inset" or not fs_path_str.strip():
+            return
+            
+        ext = Path(fs_path_str).suffix.lower()
         if not ext:
             print(f"    skip (no extension): {fs_path_str!r}")
-            continue
+            return
 
         abs_path = (base_dir / fs_path_str).resolve()
         key      = str(abs_path)
 
         if key in seen:
-            continue
+            return
         seen.add(key)
 
-        print(f"    DI raw : {raw!r}")
-        print(f"    FS path: {fs_path_str!r}")
-        print(f"    Abs    : {abs_path}")
-        result.append((raw, str(abs_path)))
+        print(f"    [{ref_type}] Raw ref : {raw_val!r}")
+        print(f"    [{ref_type}] FS path: {fs_path_str!r}")
+        print(f"    [{ref_type}] Abs    : {abs_path}")
+        result.append((raw_val, str(abs_path)))
+
+    for raw in di_raws:
+        add_ref(raw, "DI")
+
+    for raw in ob_raws:
+        add_ref(raw, "OB")
 
     return result
 
