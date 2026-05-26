@@ -1092,12 +1092,53 @@ def _rebuild_xlf_with_updated_paths(
 
 def _subfolder_from_di(di_fs_path: str) -> Path:
     p = Path(di_fs_path)
-    skip = {'..', '.', '', '/', '\\'}
-    real_parts = [
-        part for part in p.parent.parts
-        if part not in skip
-        and not (len(part) == 3 and part[1] == ':')  
-    ]
+    parts = p.parent.parts
+    
+    # 1. Search for any part starting with "translated_" (case-insensitive)
+    translated_idx = -1
+    for idx, part in enumerate(parts):
+        if part.lower().startswith("translated_"):
+            translated_idx = idx
+            
+    if translated_idx != -1:
+        # Keep everything after the "translated_..." part
+        real_parts = parts[translated_idx + 1:]
+    else:
+        # 2. Search for common media/graphics folder names (case-insensitive)
+        media_prefixes = ("graphics", "image", "img", "media", "pic", "photo", "draw")
+        media_idx = -1
+        for idx, part in enumerate(parts):
+            if any(part.lower().startswith(prefix) for prefix in media_prefixes):
+                media_idx = idx
+                break  # Take the first one to preserve nested structure
+                
+        if media_idx != -1:
+            real_parts = parts[media_idx:]
+        else:
+            # 3. Fallback for absolute paths: if absolute, only take the last directory
+            # to avoid leak/creation of full system path structure (e.g. Users/Lenovo/...)
+            is_abs = (
+                p.is_absolute() 
+                or di_fs_path.startswith('/') 
+                or di_fs_path.startswith('\\') 
+                or any(':' in part for part in parts)
+            )
+            if is_abs:
+                skip = {'..', '.', '', '/', '\\'}
+                last_part = parts[-1] if parts else ''
+                if last_part and last_part not in skip and not (len(last_part) == 3 and last_part[1] == ':'):
+                    real_parts = [last_part]
+                else:
+                    real_parts = []
+            else:
+                # For standard relative paths, just clean up .. and .
+                skip = {'..', '.', '', '/', '\\'}
+                real_parts = [
+                    part for part in parts
+                    if part not in skip
+                    and not (len(part) == 3 and part[1] == ':')
+                ]
+                
     if not real_parts:
         return Path('.')
     return Path(*real_parts)
