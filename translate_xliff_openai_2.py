@@ -1147,7 +1147,10 @@ def translate_file(input_path, output_root, target_lang, args, model_to_use):
 
     # Place the translated XLF inside a subfolder named translated_<lang> under output_root
     # so that relative paths (e.g. "../Graphics/...") resolve correctly
-    xlf_dir = output_root / f"translated_{target_lang}"
+    if output_root.name == f"translated_{target_lang}":
+        xlf_dir = output_root
+    else:
+        xlf_dir = output_root / f"translated_{target_lang}"
     xlf_dir.mkdir(parents=True, exist_ok=True)
     xlf_out_path = xlf_dir / input_path.name
 
