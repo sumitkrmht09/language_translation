@@ -997,6 +997,13 @@ def extract_reference_paths(xlf_path: Path) -> List[Tuple[str, str]]:
 
     return result
 
+def _to_di_path(fs_path: str) -> str:
+    # Convert standard relative path to device-independent path
+    # Replace '../' with '<u>' and '/' with '<c>'
+    di = fs_path.replace("../", "<u>").replace("/", "<c>").replace("\\", "<c>")
+    import html
+    return html.escape(di)
+
 def _update_mif_blob(mif_text: str, mapping: Dict[str, str]) -> Tuple[str, int]:
     result  = []
     pos     = 0
@@ -1025,11 +1032,24 @@ def _update_mif_blob(mif_text: str, mapping: Dict[str, str]) -> Tuple[str, int]:
         if old_val == "2.0 internal inset":
             continue          
 
-        result.append(mif_text[pos : ob_match.start(2)])
-        result.append(new_path)
+        # Reconstruct the string, updating BOTH ImportObFileDI and ImportObFile
+        result.append(mif_text[pos : di_match.start(1)])
+        
+        # 1. Update ImportObFileDI to device-independent format
+        new_di_path = _to_di_path(new_path)
+        result.append(new_di_path)
+        
+        # 2. Add text between ImportObFileDI end and ImportObFile start
+        result.append(mif_text[di_match.end(1) : ob_match.start(2)])
+        
+        # 3. Update ImportObFile to platform-specific format (with backslashes for local compatibility)
+        win_path = new_path.replace("/", "\\")
+        result.append(win_path)
+        
         pos = ob_match.end(2)
         updated += 1
-        print(f"    MIF: {old_val!r}  →  {new_path!r}")
+        print(f"    MIF DI: {decoded!r}  →  {new_di_path!r}")
+        print(f"    MIF OB: {old_val!r}  →  {win_path!r}")
 
     result.append(mif_text[pos:])
     return "".join(result), updated
@@ -1046,49 +1066,107 @@ def _rebuild_xlf_with_updated_paths(
         print(f"  [FAIL] Cannot parse XLF for rebuild: {e}")
         return False
 
+    root = tree.getroot()
+
+    # 1. Update <file> tags original attribute
+    for elem in root.iter():
+        tag_local = elem.tag.split("}")[-1]
+        if tag_local == "file":
+            original = elem.get("original")
+            if original:
+                original_clean = original.strip()
+                fs_path_str = _parse_mif_path(original_clean)
+                basename = Path(fs_path_str).name
+                new_path = (
+                    mapping.get(original_clean) or
+                    mapping.get(basename) or
+                    mapping.get(fs_path_str)
+                )
+                if new_path:
+                    win_path = new_path.replace("/", "\\")
+                    elem.set("original", win_path)
+                    print(f"    XML <file> original: {original_clean!r} → {win_path!r}")
+
+    # 2. Update <external-file> tags href attribute
+    for elem in root.iter():
+        tag_local = elem.tag.split("}")[-1]
+        if tag_local == "external-file":
+            href = elem.get("href")
+            if href:
+                href_clean = href.strip()
+                fs_path_str = _parse_mif_path(href_clean)
+                basename = Path(fs_path_str).name
+                new_path = (
+                    mapping.get(href_clean) or
+                    mapping.get(basename) or
+                    mapping.get(fs_path_str)
+                )
+                if new_path:
+                    win_path = new_path.replace("/", "\\")
+                    elem.set("href", win_path)
+                    print(f"    XML <external-file> href: {href_clean!r} → {win_path!r}")
+
+    # 3. Update any other element with href attribute ending in media extension
+    for elem in root.iter():
+        tag_local = elem.tag.split("}")[-1]
+        if tag_local == "external-file":
+            continue
+        href = elem.get("href")
+        if href:
+            href_clean = href.strip()
+            fs_path_str = _parse_mif_path(href_clean)
+            basename = Path(fs_path_str).name
+            new_path = (
+                mapping.get(href_clean) or
+                mapping.get(basename) or
+                mapping.get(fs_path_str)
+            )
+            if new_path:
+                win_path = new_path.replace("/", "\\")
+                elem.set("href", win_path)
+                print(f"    XML <{tag_local}> href: {href_clean!r} → {win_path!r}")
+
+    # 4. Update <internal-file> tags (MIF blob)
     internal_el = None
-    for elem in tree.getroot().iter():
+    for elem in root.iter():
         if elem.tag.split("}")[-1] == "internal-file":
             internal_el = elem
             break
 
-    if internal_el is None:
-        print("  [FAIL] No <internal-file> element found — cannot update XLF.")
-        return False
-
-    raw_b64 = (internal_el.text or "").strip()
-    if not raw_b64:
-        print("  [FAIL] <internal-file> is empty.")
-        return False
-
-    try:
-        compressed = base64.b64decode(raw_b64)
-        mif_text   = gzip.decompress(compressed).decode("utf-8", errors="replace")
-    except Exception as e:
-        print(f"  [FAIL] Blob decode failed: {e}")
-        return False
-
-    print("\n  Rewriting <ImportObFile> paths in MIF blob …")
-    updated_mif, n_updated = _update_mif_blob(mif_text, mapping)
-
-    if n_updated == 0:
-        print("  [WARN] No <ImportObFile> entries were updated.")
-        print("         Check that the mapping keys match what is in the MIF.")
-        print("         Mapping keys:", list(mapping.keys())[:6])
-
-    new_compressed        = gzip.compress(updated_mif.encode("utf-8"))
-    internal_el.text      = base64.b64encode(new_compressed).decode("ascii")
+    n_updated = 0
+    if internal_el is not None:
+        raw_b64 = (internal_el.text or "").strip()
+        if raw_b64:
+            try:
+                compressed = base64.b64decode(raw_b64)
+                if compressed[:2] == b'\x1f\x8b':
+                    mif_text = gzip.decompress(compressed).decode("utf-8", errors="replace")
+                else:
+                    mif_text = compressed.decode("utf-8", errors="replace")
+                
+                print("\n  Rewriting <ImportObFile> & <ImportObFileDI> paths in MIF blob …")
+                updated_mif, n_updated = _update_mif_blob(mif_text, mapping)
+                
+                if n_updated > 0:
+                    new_compressed = gzip.compress(updated_mif.encode("utf-8"))
+                    internal_el.text = base64.b64encode(new_compressed).decode("ascii")
+            except Exception as e:
+                print(f"  [FAIL] Internal MIF blob update failed: {e}")
 
     out_xlf_path.parent.mkdir(parents=True, exist_ok=True)
-    tree.write(
-        str(out_xlf_path),
-        xml_declaration=True,
-        encoding="UTF-8",
-        pretty_print=False,
-    )
-    print(f"  [OK] Updated XLF saved → {out_xlf_path}")
-    print(f"    ({n_updated} graphic reference(s) rewritten)")
-    return True
+    try:
+        tree.write(
+            str(out_xlf_path),
+            xml_declaration=True,
+            encoding="UTF-8",
+            pretty_print=False,
+        )
+        print(f"  [OK] Updated XLF saved → {out_xlf_path}")
+        print(f"    ({n_updated} graphic reference(s) rewritten in MIF blob)")
+        return True
+    except Exception as e:
+        print(f"  [FAIL] Failed to write updated XML tree to {out_xlf_path}: {e}")
+        return False
 
 def _subfolder_from_di(di_fs_path: str) -> Path:
     p = Path(di_fs_path)
@@ -1365,6 +1443,19 @@ def process_xlf_references(
         print(f"  [OK] Saved translation metadata to: {metadata_path}")
     except Exception as e:
         print(f"  [WARN] Failed to write translation metadata: {e}")
+
+    # Rebuild the translated XLIFF with updated paths if out_xlf_path is provided
+    if out_xlf_path and mapping:
+        src_xlf = out_xlf_path if out_xlf_path.exists() else xlf_path
+        print(f"\n  Rebuilding XLIFF with updated graphic paths -> {out_xlf_path}")
+        try:
+            _rebuild_xlf_with_updated_paths(
+                xlf_path=src_xlf,
+                mapping=mapping,
+                out_xlf_path=out_xlf_path
+            )
+        except Exception as e:
+            print(f"  [ERROR] Failed to rebuild XLIFF: {e}")
 
     print(f"\n{'='*60}")
     print(f"  Done. {len(set(mapping.values()))}/{len(refs)} file(s) translated.")
