@@ -841,16 +841,14 @@ _DI_RE = re.compile(
 
 def _to_mif_path(path_str: str) -> str:
     path_str = path_str.replace("\\", "/")
-    parts = path_str.split("/")
+    parts = [p for p in path_str.split("/") if p not in ("", ".")]
     mif_parts = []
     for part in parts:
         if part == "..":
             mif_parts.append("<u>")
         else:
-            mif_parts.append(part)
-    if mif_parts and mif_parts[0] != "<u>":
-        mif_parts.insert(0, "<u>")
-    mif_path = "<c>".join(mif_parts)
+            mif_parts.append("<c>" + part)
+    mif_path = "".join(mif_parts)
     return html.escape(mif_path)
 
 def _reencode_mif_to_blob(mif: str, original_was_gzipped: bool) -> str:
