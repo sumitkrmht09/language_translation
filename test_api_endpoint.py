@@ -98,7 +98,7 @@ def test_api():
                 print(f"  - {full_p.relative_to(EXTRACTION_DIR)}")
                 
         # 6. Read and print the references inside the decoded MIF blob
-        translated_xlf_file = list(EXTRACTION_DIR.glob("text_conversion_file/*.xlf"))
+        translated_xlf_file = list(EXTRACTION_DIR.glob("**/text_conversion_file/*.xlf"))
         if translated_xlf_file:
             xlf_file_path = translated_xlf_file[0]
             print(f"\nDecoding XLIFF internal-file blob from: {xlf_file_path.name}")

@@ -149,7 +149,7 @@ async def translate_xliff_endpoint(
                 if not path.is_file():
                     continue
                 rel = path.relative_to(zip_root)
-                arcname = f"{output_root.name}/{rel.as_posix()}"
+                arcname = f"{output_root.name}/{output_root.name}/{rel.as_posix()}"
                 zf.write(path, arcname=arcname)
                 count += 1
 
