@@ -1,6 +1,9 @@
 # Use official lightweight Python base image
 FROM python:3.10-slim
 
+# Install git so the app can query the git commit hash at runtime
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+
 # Set environment variables to prevent Python from writing pyc files and to buffer stdout/stderr
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1

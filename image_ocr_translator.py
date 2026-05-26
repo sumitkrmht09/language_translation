@@ -82,7 +82,7 @@ _LANG_ROOT: Dict[str, str] = {
     "nb":    "no",    "pt-BR": "pt",
 }
 
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff"}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff", ".eps", ".svg", ".wmf", ".emf"}
 PDF_EXTENSIONS   = {".pdf", ".pd"}
 MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | PDF_EXTENSIONS
 
@@ -1406,10 +1406,23 @@ def process_xlf_references(
 
             saved_abs = dest_folder / new_name
             final_abs = dest_folder / orig_name
+            source_abs = dest_folder / abs_path.name
+
+            # Ensure the final reference path is written
             if saved_abs.exists() and saved_abs != final_abs:
                 if final_abs.exists():
                     final_abs.unlink()
-                saved_abs.rename(final_abs)
+                shutil.copy2(str(saved_abs), str(final_abs))
+                print(f"  [COPY] Copied to final reference path: {final_abs.name}")
+
+            # Ensure the source filename is also written to preserve the extension/name from the ZIP
+            if saved_abs.exists() and saved_abs != source_abs:
+                if source_abs.exists():
+                    source_abs.unlink()
+                shutil.copy2(str(saved_abs), str(source_abs))
+                print(f"  [COPY] Preserved source filename: {source_abs.name}")
+
+            # Set saved_abs to final_abs so that the relpath calculations below use the final reference path
             saved_abs = final_abs
 
             # Calculated exact relative path from nested XLIFF folder out to Graphics folder
