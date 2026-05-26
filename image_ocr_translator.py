@@ -1359,6 +1359,19 @@ def process_xlf_references(
         abs_path = found_src_path
 
         sub = _subfolder_from_di(di_fs)
+        
+        # If the reference subfolder is empty/root, check if the located file in the uploaded
+        # graphics folder has a more specific subfolder, and use it instead!
+        if sub == Path('.') and found_src_path and src_graphics_folder:
+            try:
+                rel_found = found_src_path.relative_to(src_graphics_folder)
+                sub_found = _subfolder_from_di(str(rel_found))
+                if sub_found != Path('.'):
+                    sub = sub_found
+                    print(f"  [PATH] Reference path had no subfolder, using structure from uploaded ZIP: {sub}")
+            except Exception as e:
+                print(f"  [PATH] Failed to get relative path of found file: {e}")
+
         dest_folder = out_folder / sub
         dest_folder.mkdir(parents=True, exist_ok=True)
 
