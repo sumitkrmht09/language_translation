@@ -1360,15 +1360,16 @@ def process_xlf_references(
 
         sub = _subfolder_from_di(di_fs)
         
-        # If the reference subfolder is empty/root, check if the located file in the uploaded
-        # graphics folder has a more specific subfolder, and use it instead!
-        if sub == Path('.') and found_src_path and src_graphics_folder:
+        # If the reference subfolder has no media prefix or is empty/root, override it with the
+        # folder structure from the uploaded ZIP. This avoids leaking absolute system folders (like BadFileName).
+        has_media_prefix = any(p in str(sub).lower() for p in ("graphics", "image", "img", "media", "pic", "photo", "draw"))
+        if (sub == Path('.') or not has_media_prefix) and found_src_path and src_graphics_folder:
             try:
                 rel_found = found_src_path.relative_to(src_graphics_folder)
                 sub_found = _subfolder_from_di(str(rel_found))
-                if sub_found != Path('.'):
+                if sub_found != sub:
                     sub = sub_found
-                    print(f"  [PATH] Reference path had no subfolder, using structure from uploaded ZIP: {sub}")
+                    print(f"  [PATH] Overrode non-media/empty reference subfolder with ZIP structure: {sub}")
             except Exception as e:
                 print(f"  [PATH] Failed to get relative path of found file: {e}")
 
