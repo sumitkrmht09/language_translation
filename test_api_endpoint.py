@@ -27,7 +27,8 @@ def create_temp_graphics_zip(source_dir: Path) -> Path:
     if temp_zip.exists():
         temp_zip.unlink()
         
-    with zipfile.ZipFile(temp_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+    # Use ZIP_STORED (no compression) so that zipping large directories is instant
+    with zipfile.ZipFile(temp_zip, "w", zipfile.ZIP_STORED) as zf:
         for root, _, files in os.walk(source_dir):
             for file in files:
                 file_path = Path(root) / file
