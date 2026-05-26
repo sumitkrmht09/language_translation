@@ -3,6 +3,18 @@
 FrameMaker XLIFF -> OpenAI API -> Translated XLIFF
 """
 
+import sys
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 import os, sys, re, json, time, copy, argparse, logging
 import base64, gzip, html
 from pathlib import Path
@@ -10,9 +22,9 @@ from lxml import etree
 from openai import OpenAI
 from image_ocr_translator import process_xlf_references
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # OpenAI client 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 import os
 from dotenv import load_dotenv
@@ -29,9 +41,9 @@ MAX_TOKENS  = 8096
 BATCH_SIZE  = 40
 BATCH_DELAY = 0.5
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # SUPPORTED LANGUAGES 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 LANGUAGES = {
     "zh-CN": "Simplified Chinese (简体中文)",
     "zh-TW": "Traditional Chinese (繁體中文)",
@@ -61,14 +73,14 @@ FM_LANG = {k: k for k in LANGUAGES}
 def select_language_interactive():
     lang_items = list(LANGUAGES.items()) 
 
-    print("\n" + "═" * 62)
+    print("\n" + "=" * 62)
     print("  XLIFF TRANSLATOR — Language Selection")
-    print("═" * 62)
+    print("=" * 62)
     for i, (code, label) in enumerate(lang_items, 1):
         print(f"  {i:>2}.  {code:<8}  {label}")
-    print("═" * 62)
+    print("=" * 62)
     print("  Enter the NUMBER (e.g. 5) or CODE (e.g. de)")
-    print("═" * 62)
+    print("=" * 62)
 
     while True:
         raw = input("\n  Your choice: ").strip()
@@ -77,25 +89,25 @@ def select_language_interactive():
             idx = int(raw) - 1
             if 0 <= idx < len(lang_items):
                 code, label = lang_items[idx]
-                print(f"\n  ✓  Selected: {label}  [{code}]\n")
+                print(f"\n  [OK]  Selected: {label}  [{code}]\n")
                 return code
             else:
-                print(f"  ✗  Please enter a number between 1 and {len(lang_items)}.")
+                print(f"  [FAIL]  Please enter a number between 1 and {len(lang_items)}.")
                 continue
 
         if raw in LANGUAGES:
-            print(f"\n  ✓  Selected: {LANGUAGES[raw]}  [{raw}]\n")
+            print(f"\n  [OK]  Selected: {LANGUAGES[raw]}  [{raw}]\n")
             return raw
 
         matches = [(c, l) for c, l in lang_items if raw.lower() in l.lower()]
         if len(matches) == 1:
             code, label = matches[0]
-            print(f"\n  ✓  Matched: {label}  [{code}]\n")
+            print(f"\n  [OK]  Matched: {label}  [{code}]\n")
             return code
         elif len(matches) > 1:
-            print(f"  ✗  Ambiguous — matches: {', '.join(c for c,_ in matches)}. Be more specific.")
+            print(f"  [FAIL]  Ambiguous — matches: {', '.join(c for c,_ in matches)}. Be more specific.")
         else:
-            print(f"  ✗  '{raw}' not recognised. Try a number or a code like 'de', 'ja', 'vi'.")
+            print(f"  [FAIL]  '{raw}' not recognised. Try a number or a code like 'de', 'ja', 'vi'.")
 
 def ask_path(prompt, must_exist=True, is_file=True):
     while True:
@@ -108,7 +120,7 @@ def ask_path(prompt, must_exist=True, is_file=True):
         if not is_file and p.is_dir():
             return p
         kind = "file" if is_file else "folder"
-        print(f"  ✗  {kind} not found: {p}")
+        print(f"  [FAIL]  {kind} not found: {p}")
 
 DO_NOT_TRANSLATE = {
     "SYSTEM OK","CLASS 100","CO2 AUTO CAL","SYS IN OTEMP","TSNSR1 ERR",
@@ -857,11 +869,11 @@ def _rewrite_mif_blob(mif: str, path_mapping: dict) -> tuple:
 
     log.info(f"  MIF blob: scanned {total_seen} <ImportObFile> entr(ies); rewrote {count}")
     for orig, new, how in matched_samples:
-        log.info(f"    ✓ {orig!r}\n         → {new!r}  [{how}]")
+        log.info(f"    [OK] {orig!r}\n         → {new!r}  [{how}]")
     if unmatched_samples:
         log.warning(f"    {len(unmatched_samples)} sample(s) did NOT match — showing the values + their derived basenames:")
         for orig, bn in unmatched_samples:
-            log.warning(f"    ✗ value={orig!r}  basename={bn!r}")
+            log.warning(f"    [FAIL] value={orig!r}  basename={bn!r}")
         log.warning(f"    Mapping keys available (first 5 of {len(path_mapping)}):")
         for k in list(path_mapping.keys())[:5]:
             log.warning(f"        {k!r}")
@@ -981,7 +993,7 @@ def update_xlf_references(xlf_path, path_mapping):
 
     log.info(f"update_xlf_references: {len(filename_to_new)} unique filename(s) to rewrite")
     for bn, new_path in filename_to_new.items():
-        log.info(f"  • {bn}  →  {new_path}")
+        log.info(f"  * {bn}  →  {new_path}")
 
     parser = etree.XMLParser(remove_blank_text=False, recover=True)
     tree   = etree.parse(str(xlf_path), parser)
@@ -1021,7 +1033,7 @@ def update_xlf_references(xlf_path, path_mapping):
 
         for bn, new_path in filename_to_new.items():
             if norm == bn or norm.endswith("/" + bn):
-                log.info(f"  ✓ {current!r}  →  {new_path!r}  (matched {bn!r})")
+                log.info(f"  [OK] {current!r}  →  {new_path!r}  (matched {bn!r})")
                 rewrite_count += 1
                 return f"{head}{new_path}{tail}"
 
@@ -1050,7 +1062,7 @@ def update_xlf_references(xlf_path, path_mapping):
         for s in miss_samples[:5]:
             log.info(f"    skip: {s!r}")
 
-    # ── Rewrite <ImportObFileDI> entries too ─────────────────────────────────
+    # -- Rewrite <ImportObFileDI> entries too ---------------------------------
     # Per the Adobe MIF Reference (page 7-8, "Device-independent pathnames"),
     # FrameMaker uses ImportObFileDI as the *authoritative* graphic reference.
     # ImportObFile is FrameMaker 1.0 legacy and is only written for backward
@@ -1090,7 +1102,7 @@ def update_xlf_references(xlf_path, path_mapping):
         if new_val:
             new_di = _encode_path_as_di(new_val)
             di_rewrite_count += 1
-            log.info(f"  ✓ DI: {current!r}  →  {new_di!r}  (matched {original_bn!r})")
+            log.info(f"  [OK] DI: {current!r}  →  {new_di!r}  (matched {original_bn!r})")
             return f"{head}{new_di}{tail}"
 
         if len(di_miss_samples) < 10:
@@ -1166,7 +1178,7 @@ def translate_file(input_path, output_root, target_lang, args, model_to_use):
     batches = [to_translate[i:i+args.batch_size]
                for i in range(0, len(to_translate), args.batch_size)]
 
-    print(f"\n{'─'*62}")
+    print(f"\n{'-'*62}")
     print(f"  File         : {input_path.name}")
     print(f"  Target       : {LANGUAGES.get(target_lang, target_lang)}")
     print(f"  Model        : {model_to_use}")
@@ -1174,7 +1186,7 @@ def translate_file(input_path, output_root, target_lang, args, model_to_use):
     print(f"  Mode         : {'DRY RUN' if args.dry_run else 'LIVE'}")
     print(f"  Output root  : {output_root}")
     print(f"  XLF path     : {xlf_out_path}")
-    print(f"{'─'*62}\n")
+    print(f"{'-'*62}\n")
 
     for i, batch in enumerate(batches, 1):
         log.info(f"Batch {i}/{len(batches)}")
@@ -1200,15 +1212,15 @@ def translate_file(input_path, output_root, target_lang, args, model_to_use):
 
     try:
         save_xliff(tree, str(xlf_out_path))
-        print(f"\n  ✓  Translated XLF saved: {xlf_out_path}")
+        print(f"\n  [OK]  Translated XLF saved: {xlf_out_path}")
     except Exception as e:
         log.error(f"Failed to save XLF: {e}")
         return False
 
     try:
-        print("\n" + "─" * 62)
+        print("\n" + "-" * 62)
         print("  Processing referenced graphics (OCR)")
-        print("─" * 62)
+        print("-" * 62)
 
         path_mapping = process_xlf_references(
             input_path,
@@ -1233,18 +1245,18 @@ def translate_file(input_path, output_root, target_lang, args, model_to_use):
         #         ns=ns,
         #     )
 
-        print("\n  ✓  Graphics processing complete")
+        print("\n  [OK]  Graphics processing complete")
 
     except Exception as e:
         log.warning(f"OCR image processing failed: {e}")
-        print(f"\n  ⚠  OCR processing skipped — Reason: {e}")
+        print(f"\n  [WARN]  OCR processing skipped — Reason: {e}")
 
     try:
         export_safety_review(
             all_units, all_trans,
             str(output_root.parent / f"{input_path.stem}_safety_review.xlsx"),
         )
-        print("\n  ✓  Safety review exported (next to the deliverable, not inside it)")
+        print("\n  [OK]  Safety review exported (next to the deliverable, not inside it)")
     except Exception as e:
         log.warning(f"Safety review export failed: {e}")
 
@@ -1254,12 +1266,12 @@ def translate_file(input_path, output_root, target_lang, args, model_to_use):
     except Exception as e:
         log.warning(f"Checkpoint cleanup failed: {e}")
 
-    print("\n" + "═" * 62)
+    print("\n" + "=" * 62)
     print("  TRANSLATION COMPLETED SUCCESSFULLY")
-    print("═" * 62)
+    print("=" * 62)
     print(f"\n  Deliverable folder:")
     print(f"    {output_root}")
-    print("═" * 62)
+    print("=" * 62)
 
     return True
 
@@ -1274,16 +1286,16 @@ def run_batch(args, model_to_use, target_lang):
     )
 
     if not xlf_files:
-        print(f"\n  ✗  No .xlf or .xliff files found in: {input_folder}")
+        print(f"\n  [FAIL]  No .xlf or .xliff files found in: {input_folder}")
         sys.exit(1)
 
-    print(f"\n{'═'*62}")
+    print(f"\n{'='*62}")
     print(f"  BATCH MODE")
     print(f"  Input folder : {input_folder}")
     print(f"  Output root  : {output_folder}")
     print(f"  Files found  : {len(xlf_files)}")
     print(f"  Target lang  : {LANGUAGES.get(target_lang, target_lang)}")
-    print(f"{'═'*62}\n")
+    print(f"{'='*62}\n")
 
     success, failed = [], []
     for idx, xlf_path in enumerate(xlf_files, 1):
@@ -1295,18 +1307,18 @@ def run_batch(args, model_to_use, target_lang):
         else:
             failed.append(xlf_path.name)
 
-    print(f"\n{'═'*62}")
+    print(f"\n{'='*62}")
     print(f"  BATCH COMPLETE")
     print(f"  Success : {len(success)}/{len(xlf_files)}")
     if success:
         for f in success:
-            print(f"    ✓  {f}")
+            print(f"    [OK]  {f}")
     if failed:
         print(f"  Failed  : {len(failed)}")
         for f in failed:
-            print(f"    ✗  {f}")
+            print(f"    [FAIL]  {f}")
     print(f"\n  Output folder: {output_folder}")
-    print(f"{'═'*62}\n")
+    print(f"{'='*62}\n")
 
 def run_single(args, model_to_use, target_lang):
     input_path = Path(args.input)
@@ -1390,7 +1402,7 @@ def main():
 
     run_batch(args, model_to_use, target_lang)
 
-    # ── ZIP the language-rooted folder verbatim ──────────────────────────────
+    # -- ZIP the language-rooted folder verbatim ------------------------------
     import zipfile
     output_folder = Path(args.output_folder).expanduser().resolve()
     if output_folder.exists() and any(output_folder.iterdir()):
@@ -1407,7 +1419,7 @@ def main():
                 zf.write(path, arcname=arcname)
                 count += 1
 
-        print(f"  ✓ Zip created: {zip_path}  ({count} file(s))")
+        print(f"  [OK] Zip created: {zip_path}  ({count} file(s))")
     else:
         print("\n  (No output files found — zip skipped)")
 

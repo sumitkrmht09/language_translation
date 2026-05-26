@@ -1,4 +1,16 @@
 # image_ocr_translator.py
+import sys
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 import os
 import re
 import io
@@ -26,9 +38,9 @@ except ImportError:
     _LANGDETECT_AVAILABLE = False
     print("[WARN] langdetect not installed — pip install langdetect")
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # Config
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 import os
 from dotenv import load_dotenv
 
@@ -46,9 +58,9 @@ MIN_FONT       = 7
 MAX_FONT       = 96
 _MIN_CHARS_FOR_LANGDETECT = 20
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # Language maps
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 LANG_NAMES: Dict[str, str] = {
     "zh-CN": "Simplified Chinese",   "zh-TW": "Traditional Chinese",
@@ -71,7 +83,7 @@ _LANG_ROOT: Dict[str, str] = {
 }
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff"}
-PDF_EXTENSIONS   = {".pdf"}
+PDF_EXTENSIONS   = {".pdf", ".pd"}
 MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | PDF_EXTENSIONS
 
 
@@ -317,7 +329,7 @@ def _ocr_translate(b64_image: str, target_lang: str,
             timeout=API_TIMEOUT,
         )
     except Exception as e:
-        print(f"      ✗ API failed: {e}")
+        print(f"      [FAIL] API failed: {e}")
         return []
 
     raw = response.choices[0].message.content.strip()
@@ -325,10 +337,10 @@ def _ocr_translate(b64_image: str, target_lang: str,
         raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
     try:
         result = json.loads(raw)
-        print(f"      ✓ {len(result)} block(s) detected")
+        print(f"      [OK] {len(result)} block(s) detected")
         return result
     except Exception:
-        print(f"      ✗ JSON parse failed:\n{raw[:300]}")
+        print(f"      [FAIL] JSON parse failed:\n{raw[:300]}")
         return []
 
 def _translate_texts_batch(texts: List[str], target_lang: str) -> List[str]:
@@ -364,7 +376,7 @@ def _translate_texts_batch(texts: List[str], target_lang: str) -> List[str]:
             out.append(matched if matched else original)
         return out
     except Exception as e:
-        print(f"      ✗ batch translate error: {e}")
+        print(f"      [FAIL] batch translate error: {e}")
         return texts
 
 try:
@@ -669,9 +681,9 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
         )
         if rc >= 0:
             any_changed = True
-            print(f"      ✓ {repr(span['text'][:28])} → {repr(translated[:28])}")
+            print(f"      [OK] {repr(span['text'][:28])} → {repr(translated[:28])}")
         else:
-            print(f"      ✗ insert_text rc={rc} for {repr(span['text'][:28])}")
+            print(f"      [FAIL] insert_text rc={rc} for {repr(span['text'][:28])}")
 
     return any_changed
 
@@ -716,7 +728,7 @@ def process_image(
     try:
         pil_img = Image.open(str(source_path)).convert("RGB")
     except Exception as e:
-        print(f"  ✗ Cannot open image: {e}")
+        print(f"  [FAIL] Cannot open image: {e}")
         return ""
 
     pil_img      = _cap_image(pil_img)        
@@ -749,7 +761,7 @@ def process_image(
     if save_fmt == "JPEG":
         kw["quality"] = 95
     pil_img.save(str(out_path), **kw)
-    print(f"  ✓ Saved → {new_name}")
+    print(f"  [OK] Saved → {new_name}")
     return new_name
 
 def process_pdf(
@@ -764,7 +776,7 @@ def process_pdf(
     try:
         doc = fitz.open(str(source_path))
     except Exception as e:
-        print(f"  ✗ Cannot open PDF: {e}")
+        print(f"  [FAIL] Cannot open PDF: {e}")
         return ""
 
     new_name = (
@@ -778,7 +790,7 @@ def process_pdf(
         print("  - Document already in target language — copying unchanged.")
         doc.close()
         shutil.copy2(str(source_path), str(out_path))
-        print(f"  ✓ Copied → {new_name}")
+        print(f"  [OK] Copied → {new_name}")
         return new_name
 
     if not full_text.strip():
@@ -790,11 +802,11 @@ def process_pdf(
         print(f"      page {idx+1}/{len(doc)}", flush=True)
         if _has_real_text(page):
             changed = _process_text_layer_page(page, target_lang)
-            print(f"      {'✓' if changed else '-'} "
+            print(f"      {'[OK]' if changed else '-'} "
                   f"{'text-layer translated' if changed else 'text-layer: no changes'}")
         else:
             changed = _process_image_layer_page(doc, page, target_lang)
-            print(f"      {'✓' if changed else '-'} "
+            print(f"      {'[OK]' if changed else '-'} "
                   f"{'image-OCR translated' if changed else 'image-OCR: no text'}")
         if changed:
             any_changed = True
@@ -803,14 +815,14 @@ def process_pdf(
         print("  - Nothing translated — copying unchanged.")
         doc.close()
         shutil.copy2(str(source_path), str(out_path))
-        print(f"  ✓ Copied → {new_name}")
+        print(f"  [OK] Copied → {new_name}")
         return new_name
 
     tmp = str(out_path) + ".tmp.pdf"
     doc.save(tmp, garbage=4, deflate=True)
     doc.close()
     os.replace(tmp, str(out_path))
-    print(f"  ✓ Saved → {new_name}")
+    print(f"  [OK] Saved → {new_name}")
     return new_name
 
 _DI_RE = re.compile(
@@ -836,7 +848,7 @@ def _decode_internal_file_blob(xlf_path: Path) -> str:
     try:
         tree = etree.parse(str(xlf_path), parser)
     except Exception as e:
-        print(f"  ✗ Cannot parse XLF: {e}")
+        print(f"  [FAIL] Cannot parse XLF: {e}")
         return ""
 
     internal_el = None
@@ -857,34 +869,31 @@ def _decode_internal_file_blob(xlf_path: Path) -> str:
     try:
         compressed = base64.b64decode(raw_b64)
     except Exception as e:
-        print(f"  ✗ base64 decode failed: {e}")
+        print(f"  [FAIL] base64 decode failed: {e}")
         return ""
 
     if compressed[:2] == b'\x1f\x8b':
         try:
             return gzip.decompress(compressed).decode("utf-8", errors="replace")
         except Exception as e:
-            print(f"  ✗ gzip decompress failed: {e}")
+            print(f"  [FAIL] gzip decompress failed: {e}")
             return ""
 
     return compressed.decode("utf-8", errors="replace")
 
 def extract_reference_paths(xlf_path: Path) -> List[Tuple[str, str]]:
-    print(f"  Decoding internal-file blob in: {xlf_path.name}", flush=True)
-    mif = _decode_internal_file_blob(xlf_path)
-    if not mif:
-        print("  ✗ Could not decode internal-file blob — no refs extracted.")
+    xlf_path = Path(xlf_path)
+    base_dir = xlf_path.parent
+
+    parser = etree.XMLParser(remove_blank_text=False, recover=True)
+    try:
+        tree = etree.parse(str(xlf_path), parser)
+    except Exception as e:
+        print(f"  [FAIL] Cannot parse XLF: {e}")
         return []
 
-    base_dir = xlf_path.parent
-    di_raws  = _DI_RE.findall(mif)
-    ob_matches = _OB_RE.findall(mif)
-    ob_raws  = [match[1] for match in ob_matches]
-
-    print(f"  ImportObFileDI entries found: {len(di_raws)}")
-    print(f"  ImportObFile entries found: {len(ob_raws)}")
-
-    seen:   set                    = set()
+    root = tree.getroot()
+    seen: set = set()
     result: List[Tuple[str, str]] = []
 
     def add_ref(raw_val: str, ref_type: str):
@@ -894,11 +903,10 @@ def extract_reference_paths(xlf_path: Path) -> List[Tuple[str, str]]:
             
         ext = Path(fs_path_str).suffix.lower()
         if not ext:
-            print(f"    skip (no extension): {fs_path_str!r}")
             return
 
         abs_path = (base_dir / fs_path_str).resolve()
-        key      = str(abs_path)
+        key = str(abs_path)
 
         if key in seen:
             return
@@ -909,11 +917,83 @@ def extract_reference_paths(xlf_path: Path) -> List[Tuple[str, str]]:
         print(f"    [{ref_type}] Abs    : {abs_path}")
         result.append((raw_val, str(abs_path)))
 
-    for raw in di_raws:
-        add_ref(raw, "DI")
+    # 1. Scan all <internal-file> tags
+    internal_elements = []
+    for elem in root.iter():
+        tag_local = elem.tag.split("}")[-1]
+        if tag_local == "internal-file":
+            internal_elements.append(elem)
 
-    for raw in ob_raws:
-        add_ref(raw, "OB")
+    print(f"  Total <internal-file> tags found: {len(internal_elements)}")
+    for idx, elem in enumerate(internal_elements):
+        raw_b64 = (elem.text or "").strip()
+        if not raw_b64:
+            continue
+        try:
+            compressed = base64.b64decode(raw_b64)
+            if compressed[:2] == b'\x1f\x8b':
+                mif = gzip.decompress(compressed).decode("utf-8", errors="replace")
+            else:
+                mif = compressed.decode("utf-8", errors="replace")
+            
+            di_raws = _DI_RE.findall(mif)
+            ob_matches = _OB_RE.findall(mif)
+            ob_raws = [match[1] for match in ob_matches]
+            
+            print(f"    [internal-file {idx}] ImportObFileDI found: {len(di_raws)}, ImportObFile found: {len(ob_raws)}")
+            for raw in di_raws:
+                add_ref(raw, f"DI-IF-{idx}")
+            for raw in ob_raws:
+                add_ref(raw, f"OB-IF-{idx}")
+        except Exception as e:
+            print(f"    [FAIL] Error decoding/parsing internal-file {idx}: {e}")
+
+    # 2. Scan all <file> tags and check the 'original' attribute
+    file_elements = []
+    for elem in root.iter():
+        tag_local = elem.tag.split("}")[-1]
+        if tag_local == "file":
+            file_elements.append(elem)
+
+    print(f"  Total <file> tags found: {len(file_elements)}")
+    for idx, elem in enumerate(file_elements):
+        original = elem.get("original")
+        if original:
+            original_clean = original.strip()
+            ext = Path(original_clean).suffix.lower()
+            if ext in MEDIA_EXTENSIONS or ext == ".pd":
+                print(f"    [file {idx}] Found graphic reference in 'original' attribute: {original_clean}")
+                add_ref(original_clean, f"FILE-ATTR-{idx}")
+
+    # 3. Scan all <external-file> tags and check the 'href' attribute
+    external_elements = []
+    for elem in root.iter():
+        tag_local = elem.tag.split("}")[-1]
+        if tag_local == "external-file":
+            external_elements.append(elem)
+
+    print(f"  Total <external-file> tags found: {len(external_elements)}")
+    for idx, elem in enumerate(external_elements):
+        href = elem.get("href")
+        if href:
+            href_clean = href.strip()
+            ext = Path(href_clean).suffix.lower()
+            if ext in MEDIA_EXTENSIONS or ext == ".pd":
+                print(f"    [external-file {idx}] Found graphic reference in 'href' attribute: {href_clean}")
+                add_ref(href_clean, f"EXT-HREF-{idx}")
+
+    # 4. Scan any other element with 'href' attribute ending in a media extension
+    for elem in root.iter():
+        tag_local = elem.tag.split("}")[-1]
+        if tag_local == "external-file":
+            continue
+        href = elem.get("href")
+        if href:
+            href_clean = href.strip()
+            ext = Path(href_clean).suffix.lower()
+            if ext in MEDIA_EXTENSIONS or ext == ".pd":
+                print(f"    [<{tag_local}>] Found graphic reference in 'href' attribute: {href_clean}")
+                add_ref(href_clean, f"HREF-{tag_local}")
 
     return result
 
@@ -963,7 +1043,7 @@ def _rebuild_xlf_with_updated_paths(
     try:
         tree = etree.parse(str(xlf_path), parser)
     except Exception as e:
-        print(f"  ✗ Cannot parse XLF for rebuild: {e}")
+        print(f"  [FAIL] Cannot parse XLF for rebuild: {e}")
         return False
 
     internal_el = None
@@ -973,19 +1053,19 @@ def _rebuild_xlf_with_updated_paths(
             break
 
     if internal_el is None:
-        print("  ✗ No <internal-file> element found — cannot update XLF.")
+        print("  [FAIL] No <internal-file> element found — cannot update XLF.")
         return False
 
     raw_b64 = (internal_el.text or "").strip()
     if not raw_b64:
-        print("  ✗ <internal-file> is empty.")
+        print("  [FAIL] <internal-file> is empty.")
         return False
 
     try:
         compressed = base64.b64decode(raw_b64)
         mif_text   = gzip.decompress(compressed).decode("utf-8", errors="replace")
     except Exception as e:
-        print(f"  ✗ Blob decode failed: {e}")
+        print(f"  [FAIL] Blob decode failed: {e}")
         return False
 
     print("\n  Rewriting <ImportObFile> paths in MIF blob …")
@@ -1006,7 +1086,7 @@ def _rebuild_xlf_with_updated_paths(
         encoding="UTF-8",
         pretty_print=False,
     )
-    print(f"  ✓ Updated XLF saved → {out_xlf_path}")
+    print(f"  [OK] Updated XLF saved → {out_xlf_path}")
     print(f"    ({n_updated} graphic reference(s) rewritten)")
     return True
 
@@ -1105,11 +1185,43 @@ def process_xlf_references(
                             found_src_path = item
                             break
 
+            # STEM FALLBACK: If still not found, try matching by stem (base name without extension)
+            if not found_src_path:
+                target_stem = unicodedata.normalize('NFC', abs_path.stem.lower())
+                
+                def matches_target_stem(name: str) -> bool:
+                    p_item = Path(name)
+                    norm_stem = unicodedata.normalize('NFC', p_item.stem.lower())
+                    return norm_stem == target_stem and p_item.suffix.lower() in (MEDIA_EXTENSIONS | {".pd"})
+
+                # Check 4: Structure match with stem only
+                if c1_dir.is_dir():
+                    for item in c1_dir.iterdir():
+                        if item.is_file() and matches_target_stem(item.name):
+                            found_src_path = item
+                            break
+
+                if not found_src_path:
+                    # Check 5: Direct match inside root with stem only
+                    if src_g_root.is_dir():
+                        for item in src_g_root.iterdir():
+                            if item.is_file() and matches_target_stem(item.name):
+                                found_src_path = item
+                                break
+
+                if not found_src_path:
+                    # Check 6: Scan anywhere inside uploaded directory structure with stem only
+                    if src_g_root.is_dir():
+                        for item in src_g_root.rglob("*"):
+                            if item.is_file() and matches_target_stem(item.name):
+                                found_src_path = item
+                                break
+
         if not found_src_path:
-            print(f"  ✗ Image file not found inside uploaded folder hierarchy: {abs_path.name}")
+            print(f"  [MISSING] Image file not found inside uploaded folder hierarchy: {abs_path.name}")
             continue
 
-        print(f"  ✓ Located image in uploaded Graphics folder -> {found_src_path}")
+        print(f"  [OK] Located image in uploaded Graphics folder -> {found_src_path}")
         orig_name = abs_path.name
         abs_path = found_src_path
 
@@ -1127,7 +1239,7 @@ def process_xlf_references(
                         rename_with_lang=rename_with_lang,
                     )
                 except Exception as e:
-                    print(f"  ⚠  process_image failed ({e}) -- falling back to copy")
+                    print(f"  [WARN] process_image failed ({e}) -- falling back to copy")
             elif ext in PDF_EXTENSIONS:
                 try:
                     new_name = process_pdf(
@@ -1135,7 +1247,7 @@ def process_xlf_references(
                         rename_with_lang=rename_with_lang,
                     )
                 except Exception as e:
-                    print(f"  ⚠  process_pdf failed ({e}) -- falling back to copy")
+                    print(f"  [WARN] process_pdf failed ({e}) -- falling back to copy")
             
             if not new_name:
                 print(f"  - Blindly copying fallback/unknown extension file: {abs_path.name}")
@@ -1153,7 +1265,7 @@ def process_xlf_references(
             # Calculated exact relative path from nested XLIFF folder out to Graphics folder
             mif_ref = os.path.relpath(str(saved_abs), str(xlf_out_dir)).replace(os.sep, "/")
 
-            print(f"  Saved  → {saved_abs}")
+            print(f"  Saved  -> {saved_abs}")
             print(f"  MIF ref: {mif_ref!r}")
 
             mapping[abs_path.name]   = mif_ref   
@@ -1161,7 +1273,7 @@ def process_xlf_references(
             mapping[di_raw]          = mif_ref   
 
         except Exception as e:
-            print(f"  ✗ Error on {abs_path.name}: {e}")
+            print(f"  [ERROR] Error on {abs_path.name}: {e}")
 
     print(f"\n{'='*60}")
     print(f"  Done. {len(set(mapping.values()))}/{len(refs)} file(s) translated.")
