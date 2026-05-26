@@ -1142,6 +1142,11 @@ def process_xlf_references(
 
     mapping: Dict[str, str] = {}
 
+    # Dashboard Tracking Metadata
+    details = []
+    fulfilled_count = 0
+    missing_count = 0
+
     for di_raw, abs_path_str in refs:
         abs_path = Path(abs_path_str)
         di_fs    = _parse_mif_path(di_raw)      
@@ -1219,6 +1224,15 @@ def process_xlf_references(
 
         if not found_src_path:
             print(f"  [MISSING] Image file not found inside uploaded folder hierarchy: {abs_path.name}")
+            missing_count += 1
+            details.append({
+                "raw_reference": di_raw,
+                "parsed_path": di_fs,
+                "status": "Missing",
+                "source_file": None,
+                "output_path": None,
+                "action": "None"
+            })
             continue
 
         print(f"  [OK] Located image in uploaded Graphics folder -> {found_src_path}")
@@ -1231,6 +1245,7 @@ def process_xlf_references(
 
         ext = abs_path.suffix.lower()
         new_name = None
+        action_taken = "None"
         try:
             if ext in IMAGE_EXTENSIONS:
                 try:
@@ -1238,6 +1253,7 @@ def process_xlf_references(
                         abs_path, target_lang, dest_folder,
                         rename_with_lang=rename_with_lang,
                     )
+                    action_taken = "Translated (Image)"
                 except Exception as e:
                     print(f"  [WARN] process_image failed ({e}) -- falling back to copy")
             elif ext in PDF_EXTENSIONS:
@@ -1246,6 +1262,7 @@ def process_xlf_references(
                         abs_path, target_lang, dest_folder,
                         rename_with_lang=rename_with_lang,
                     )
+                    action_taken = "Translated (PDF)"
                 except Exception as e:
                     print(f"  [WARN] process_pdf failed ({e}) -- falling back to copy")
             
@@ -1253,6 +1270,7 @@ def process_xlf_references(
                 print(f"  - Blindly copying fallback/unknown extension file: {abs_path.name}")
                 new_name = abs_path.name
                 shutil.copy2(str(abs_path), str(dest_folder / new_name))
+                action_taken = "Copied (Fallback)"
 
             saved_abs = dest_folder / new_name
             final_abs = dest_folder / orig_name
@@ -1272,8 +1290,40 @@ def process_xlf_references(
             mapping[di_fs]           = mif_ref   
             mapping[di_raw]          = mif_ref   
 
+            fulfilled_count += 1
+            try:
+                rel_src = str(found_src_path.relative_to(src_graphics_folder)) if src_graphics_folder else found_src_path.name
+            except ValueError:
+                rel_src = found_src_path.name
+            
+            relative_output_path = os.path.relpath(str(saved_abs), str(out_folder)).replace(os.sep, "/")
+            details.append({
+                "raw_reference": di_raw,
+                "parsed_path": di_fs,
+                "status": "Fulfilled",
+                "source_file": rel_src,
+                "output_path": relative_output_path,
+                "action": action_taken
+            })
+
         except Exception as e:
             print(f"  [ERROR] Error on {abs_path.name}: {e}")
+
+    # Write dashboard metadata JSON file
+    import json
+    metadata = {
+        "total_references": len(refs),
+        "fulfilled_count": fulfilled_count,
+        "missing_count": missing_count,
+        "details": details
+    }
+    metadata_path = out_folder / "translation_metadata.json"
+    try:
+        with open(metadata_path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2, ensure_ascii=False)
+        print(f"  [OK] Saved translation metadata to: {metadata_path}")
+    except Exception as e:
+        print(f"  [WARN] Failed to write translation metadata: {e}")
 
     print(f"\n{'='*60}")
     print(f"  Done. {len(set(mapping.values()))}/{len(refs)} file(s) translated.")

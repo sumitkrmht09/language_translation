@@ -82,28 +82,46 @@ def cleanup_workspace(workspace_dir: Path):
 
 
 def extract_zip_safely(zip_path: Path, extract_to: Path):
-    logger.info(f"Extracting ZIP safely to {extract_to} (correcting non-ASCII encodings)")
+    logger.info(f"Extracting ZIP safely to {extract_to} (extracting to multiple encoding candidates to prevent mismatches)")
     with zipfile.ZipFile(zip_path, "r") as zf:
         for member in zf.infolist():
             filename = member.filename
+            candidates = set()
+            
+            # Candidate 1: Direct decoding by zipfile
+            candidates.add(filename)
+            
+            # Candidate 2: Try UTF-8 / CP1252 / CP437 alternatives
             try:
                 raw_bytes = filename.encode('cp437')
                 try:
-                    correct_name = raw_bytes.decode('utf-8')
+                    candidates.add(raw_bytes.decode('utf-8'))
                 except UnicodeDecodeError:
-                    correct_name = raw_bytes.decode('cp1252')
+                    pass
+                try:
+                    candidates.add(raw_bytes.decode('cp1252'))
+                except Exception:
+                    pass
+                try:
+                    candidates.add(raw_bytes.decode('cp437'))
+                except Exception:
+                    pass
             except Exception:
-                correct_name = filename
-                
-            correct_name = correct_name.replace('\\', '/')
-            target_path = extract_to / correct_name
+                pass
             
-            if member.is_dir():
-                target_path.mkdir(parents=True, exist_ok=True)
-            else:
-                target_path.parent.mkdir(parents=True, exist_ok=True)
-                with zf.open(member) as source, open(target_path, 'wb') as target:
-                    shutil.copyfileobj(source, target)
+            # Extract the member to all candidate filenames
+            for name in candidates:
+                name_clean = name.replace('\\', '/')
+                # Skip empty or absolute paths out of boundary for safety
+                if not name_clean.strip() or name_clean.startswith('/') or '../' in name_clean:
+                    continue
+                target_path = extract_to / name_clean
+                if member.is_dir():
+                    target_path.mkdir(parents=True, exist_ok=True)
+                else:
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    with zf.open(member) as source, open(target_path, 'wb') as target:
+                        shutil.copyfileobj(source, target)
 
 
 

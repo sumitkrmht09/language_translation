@@ -270,6 +270,7 @@ with st.container():
                     )
                     
                 # Inspect response
+                # Inspect response
                 if response.status_code == 200:
                     st.success("🎉 Translation Pipeline completed successfully!")
                     
@@ -277,6 +278,99 @@ with st.container():
                     output_bytes = response.content
                     filename = f"translated_{target_lang}.zip"
                     
+                    # Parse ZIP in memory to read translation_metadata.json
+                    import io
+                    import zipfile
+                    import json
+                    import pandas as pd
+
+                    metadata = None
+                    zip_files_list = []
+                    try:
+                        zip_buffer = io.BytesIO(output_bytes)
+                        with zipfile.ZipFile(zip_buffer, "r") as zf:
+                            zip_files_list = zf.namelist()
+                            metadata_filename = None
+                            for name in zip_files_list:
+                                if name.endswith("translation_metadata.json"):
+                                    metadata_filename = name
+                                    break
+                            
+                            if metadata_filename:
+                                metadata = json.loads(zf.read(metadata_filename).decode("utf-8"))
+                    except Exception as e:
+                        st.warning(f"Could not parse ZIP file contents for report: {e}")
+
+                    # Render tracking dashboard if metadata is available
+                    if metadata:
+                        st.subheader("📊 Graphic Reference Tracking Dashboard")
+                        
+                        # 1. High-level metric cards
+                        m1, m2, m3 = st.columns(3)
+                        m1.metric("Total Reference Paths", metadata.get("total_references", 0))
+                        m2.metric("Fulfilled (Found & Processed)", metadata.get("fulfilled_count", 0))
+                        m3.metric("Missing (Not in ZIP)", metadata.get("missing_count", 0), delta=-metadata.get("missing_count", 0), delta_color="inverse")
+                        
+                        # 2. Detailed reference mapping table
+                        details = metadata.get("details", [])
+                        if details:
+                            # Build lists for dataframe
+                            status_icons = []
+                            raw_refs = []
+                            parsed_paths = []
+                            src_files = []
+                            out_paths = []
+                            actions = []
+
+                            for item in details:
+                                if item["status"] == "Fulfilled":
+                                    status_icons.append("🟢 Fulfilled")
+                                else:
+                                    status_icons.append("🔴 Missing")
+                                raw_refs.append(item["raw_reference"])
+                                parsed_paths.append(item["parsed_path"])
+                                src_files.append(item["source_file"] or "-")
+                                out_paths.append(item["output_path"] or "-")
+                                actions.append(item["action"] or "-")
+
+                            df = pd.DataFrame({
+                                "Status": status_icons,
+                                "Raw Reference in XLF": raw_refs,
+                                "Parsed Folder Path": parsed_paths,
+                                "Matched Source File": src_files,
+                                "Output Path inside ZIP": out_paths,
+                                "Action Taken": actions
+                            })
+
+                            # Style/display the dataframe
+                            st.write("Detailed File Tracking:")
+                            st.dataframe(
+                                df,
+                                column_config={
+                                    "Status": st.column_config.TextColumn("Status", width="medium"),
+                                    "Raw Reference in XLF": st.column_config.TextColumn("Raw Reference in XLF", width="large"),
+                                    "Parsed Folder Path": st.column_config.TextColumn("Parsed Folder Path", width="medium"),
+                                    "Matched Source File": st.column_config.TextColumn("Matched Source File", width="medium"),
+                                    "Output Path inside ZIP": st.column_config.TextColumn("Output Path inside ZIP", width="large"),
+                                    "Action Taken": st.column_config.TextColumn("Action Taken", width="medium"),
+                                },
+                                hide_index=True,
+                                use_container_width=True
+                            )
+                        else:
+                            st.info("No details found in metadata.")
+                    else:
+                        st.info("No reference metadata found in the output. Your manual may not have referenced graphics.")
+
+                    # Also show output file hierarchy preview
+                    if zip_files_list:
+                        with st.expander("📂 Generated Output ZIP File Hierarchy"):
+                            # Filter and list relative files
+                            clean_names = sorted([n for n in zip_files_list if not n.endswith('/')])
+                            for fn in clean_names:
+                                st.code(fn, language="text")
+
+                    st.markdown("<br>", unsafe_allow_html=True)
                     st.download_button(
                         label="⬇️ Download Translated Manual & Graphics (ZIP)",
                         data=output_bytes,
