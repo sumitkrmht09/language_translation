@@ -1109,24 +1109,29 @@ def process_xlf_references(
         dest_folder.mkdir(parents=True, exist_ok=True)
 
         ext = abs_path.suffix.lower()
+        new_name = None
         try:
             if ext in IMAGE_EXTENSIONS:
-                new_name = process_image(
-                    abs_path, target_lang, dest_folder,
-                    rename_with_lang=rename_with_lang,
-                )
+                try:
+                    new_name = process_image(
+                        abs_path, target_lang, dest_folder,
+                        rename_with_lang=rename_with_lang,
+                    )
+                except Exception as e:
+                    print(f"  ⚠  process_image failed ({e}) -- falling back to copy")
             elif ext in PDF_EXTENSIONS:
-                new_name = process_pdf(
-                    abs_path, target_lang, dest_folder,
-                    rename_with_lang=rename_with_lang,
-                )
-            else:
-                print(f"  - Blindly copying unknown extension {ext} file: {abs_path.name}")
+                try:
+                    new_name = process_pdf(
+                        abs_path, target_lang, dest_folder,
+                        rename_with_lang=rename_with_lang,
+                    )
+                except Exception as e:
+                    print(f"  ⚠  process_pdf failed ({e}) -- falling back to copy")
+            
+            if not new_name:
+                print(f"  - Blindly copying fallback/unknown extension file: {abs_path.name}")
                 new_name = abs_path.name
                 shutil.copy2(str(abs_path), str(dest_folder / new_name))
-
-            if not new_name:
-                continue
 
             saved_abs = dest_folder / new_name
 

@@ -876,6 +876,99 @@ def _reencode_mif_to_blob(mif: str, original_was_gzipped: bool) -> str:
     return base64.b64encode(raw).decode("ascii")
 
 
+def embed_images_in_xlf(xlf_path, path_mapping, xlf_out_dir, ns):
+    if not path_mapping:
+        return
+        
+    unique_mif_refs = set(path_mapping.values())
+    if not unique_mif_refs:
+        return
+
+    # Load translated XLIFF file
+    parser = etree.XMLParser(remove_blank_text=False, resolve_entities=False, recover=True)
+    tree = etree.parse(str(xlf_path), parser)
+    root = tree.getroot()
+    
+    # Locate body element
+    body_el = None
+    body_tag = Q("body", ns)
+    for elem in root.iter(body_tag):
+        body_el = elem
+        break
+        
+    if body_el is None:
+        log.warning(f"embed_images_in_xlf: No <body> element found in {xlf_path}")
+        return
+
+    supported_extensions = {".png", ".jpeg", ".jpg", ".pdf"}
+    
+    embedded_count = 0
+    for idx, mif_ref in enumerate(sorted(list(unique_mif_refs)), 1):
+        ext = Path(mif_ref.lower()).suffix
+        if ext not in supported_extensions:
+            continue
+            
+        translated_file_path = (xlf_out_dir / mif_ref).resolve()
+        if not translated_file_path.exists():
+            log.warning(f"embed_images_in_xlf: Translated file not found on disk: {translated_file_path}")
+            continue
+
+        try:
+            # Read binary data and base64 encode
+            binary_data = translated_file_path.read_bytes()
+            b64_data = base64.b64encode(binary_data).decode("ascii")
+            
+            # Determine original reference path (the key in path_mapping matching this mif_ref)
+            orig_ref = None
+            for k, v in path_mapping.items():
+                if v == mif_ref:
+                    # Prefer path-like keys (containing slashes/backslashes or starting with ..)
+                    if "/" in k or "\\" in k or k.startswith(".."):
+                        orig_ref = k
+                        break
+            if not orig_ref:
+                for k, v in path_mapping.items():
+                    if v == mif_ref:
+                        orig_ref = k
+                        break
+            
+            # Determine mime-type
+            if ext == ".pdf":
+                mime_type = "application/pdf"
+            elif ext in {".jpg", ".jpeg"}:
+                mime_type = "image/jpeg"
+            else:
+                mime_type = "image/png"  # Default to image/png for other supported extensions (.png)
+
+            # Create bin-unit XML structure
+            bin_unit = etree.Element(Q("bin-unit", ns))
+            bin_unit.set("id", f"img_{idx}")
+            bin_unit.set("mime-type", mime_type)
+
+            bin_source = etree.SubElement(bin_unit, Q("bin-source", ns))
+            external_file = etree.SubElement(bin_source, Q("external-file", ns))
+            external_file.set("href", orig_ref)
+
+            bin_target = etree.SubElement(bin_unit, Q("bin-target", ns))
+            bin_data = etree.SubElement(bin_target, Q("bin-data", ns))
+            bin_data.set("encoding", "base64")
+            bin_data.text = b64_data
+
+            # Append to body
+            body_el.append(bin_unit)
+            embedded_count += 1
+            log.info(f"embed_images_in_xlf: Embedded {orig_ref} as bin-unit img_{idx}")
+        except Exception as e:
+            log.error(f"embed_images_in_xlf: Failed to embed {mif_ref}: {e}")
+
+    if embedded_count > 0:
+        try:
+            tree.write(str(xlf_path), encoding="utf-8", xml_declaration=True)
+            log.info(f"embed_images_in_xlf: Successfully saved XLIFF with {embedded_count} embedded image(s) → {xlf_path}")
+        except Exception as e:
+            log.error(f"embed_images_in_xlf: Failed to save updated XLIFF: {e}")
+
+
 def update_xlf_references(xlf_path, path_mapping):
     if not path_mapping:
         log.warning("update_xlf_references: empty mapping; nothing to do")
@@ -1131,6 +1224,15 @@ def translate_file(input_path, output_root, target_lang, args, model_to_use):
         # if path_mapping:
         #     print("\n  Rewriting <ImportObFile> entries in the translated XLF…")
         #     update_xlf_references(xlf_out_path, path_mapping)
+
+        if path_mapping:
+            print("\n  Embedding translated graphics directly inside XLIFF...")
+            embed_images_in_xlf(
+                xlf_path=xlf_out_path,
+                path_mapping=path_mapping,
+                xlf_out_dir=xlf_out_path.parent,
+                ns=ns,
+            )
 
         print("\n  ✓  Graphics processing complete")
 
