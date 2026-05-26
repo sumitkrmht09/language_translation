@@ -1045,7 +1045,6 @@ def update_xlf_references(xlf_path, path_mapping):
         log.warning("  Available basenames to match against:")
         for bn in filename_to_new:
             log.warning(f"    {bn!r}")
-        return
     if miss_samples:
         log.info(f"  ({len(miss_samples)} <ImportObFile> value(s) intentionally left alone — none matched a translated file):")
         for s in miss_samples[:5]:
@@ -1221,9 +1220,9 @@ def translate_file(input_path, output_root, target_lang, args, model_to_use):
             src_graphics_folder=getattr(args, "graphics_source_folder", None),  # Pass uploaded input target 
         )
 
-        # if path_mapping:
-        #     print("\n  Rewriting <ImportObFile> entries in the translated XLF…")
-        #     update_xlf_references(xlf_out_path, path_mapping)
+        if path_mapping:
+            print("\n  Rewriting <ImportObFile> entries inside the translated XLIFF...")
+            update_xlf_references(xlf_out_path, path_mapping)
 
         if path_mapping:
             print("\n  Embedding translated graphics directly inside XLIFF...")
