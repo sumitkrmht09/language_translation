@@ -152,12 +152,21 @@ class TranslateRequest(BaseModel):
     target_lang: str
 
 
+def get_git_commit():
+    try:
+        import subprocess
+        out = subprocess.check_output(["git", "log", "-n", "1", "--format=%h - %s"], text=True)
+        return out.strip()
+    except Exception:
+        return "Unknown"
+
 @app.get("/")
 def home():
     return {
         "status": "online",
         "service": "FrameMaker XLIFF & Graphics Translator API",
-        "auth_enabled": bool(API_SECRET_KEY)
+        "auth_enabled": bool(API_SECRET_KEY),
+        "commit": get_git_commit()
     }
 
 
