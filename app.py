@@ -793,14 +793,21 @@ def home():
         function handleFileSelected(input, dropzoneId, indicatorId) {{
             const dropzone = document.getElementById(dropzoneId);
             const indicator = document.getElementById(indicatorId);
+            const icon = dropzone.querySelector('.dropzone-icon');
+            const text = dropzone.querySelector('.dropzone-text');
+            
             if (input.files.length > 0) {{
                 const file = input.files[0];
                 indicator.innerText = "✓ " + file.name + " (" + (file.size / 1024 / 1024).toFixed(2) + " MB)";
                 indicator.style.display = "flex";
+                if (icon) icon.style.display = "none";
+                if (text) text.style.display = "none";
                 dropzone.style.borderColor = "var(--success)";
                 dropzone.style.background = "rgba(16, 185, 129, 0.03)";
             }} else {{
                 indicator.style.display = "none";
+                if (icon) icon.style.display = "inline-block";
+                if (text) text.style.display = "block";
                 dropzone.style.borderColor = "";
                 dropzone.style.background = "";
             }}
