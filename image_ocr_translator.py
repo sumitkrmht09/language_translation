@@ -1139,8 +1139,9 @@ def process_xlf_references(
 
             saved_abs = dest_folder / new_name
 
-            # Calculated relative path from unzipped root folder to Graphics file
-            mif_ref = os.path.relpath(str(saved_abs), str(out_folder.parent)).replace(os.sep, "/")
+            # Calculated relative path from translated XLIFF directory to Graphics file
+            ref_dir = out_xlf_path.parent if out_xlf_path else out_folder.parent
+            mif_ref = os.path.relpath(str(saved_abs), str(ref_dir)).replace(os.sep, "/")
 
             print(f"  Saved  → {saved_abs}")
             print(f"  MIF ref: {mif_ref!r}")
