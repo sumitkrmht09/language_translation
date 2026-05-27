@@ -350,12 +350,22 @@ def home():
         .dropzone {{
             border: 2px dashed rgba(255, 255, 255, 0.15);
             border-radius: 12px;
-            padding: 2rem 1.5rem;
+            padding: 2.25rem 1.5rem;
             text-align: center;
-            cursor: pointer;
             background: rgba(255, 255, 255, 0.01);
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             position: relative;
+            overflow: hidden;
+        }}
+        .dropzone input[type="file"] {{
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            cursor: pointer;
+            z-index: 10;
         }}
         .dropzone:hover, .dropzone.dragover {{
             border-color: var(--primary);
@@ -656,10 +666,10 @@ def home():
                     <!-- XLIFF Upload -->
                     <div class="form-group">
                         <label class="form-label">XLIFF Source Document (.xlf, .xliff)</label>
-                        <div class="dropzone" id="xlf-dropzone" onclick="document.getElementById('xlf-file').click()">
+                        <div class="dropzone" id="xlf-dropzone">
                             <span class="dropzone-icon">📄</span>
                             <div class="dropzone-text">Drag & drop your XLIFF file, or <strong>browse</strong></div>
-                            <input type="file" id="xlf-file" name="file" accept=".xlf,.xliff" style="display:none" onchange="handleFileSelected(this, 'xlf-dropzone', 'xlf-indicator')" required>
+                            <input type="file" id="xlf-file" name="file" accept=".xlf,.xliff" onchange="handleFileSelected(this, 'xlf-dropzone', 'xlf-indicator')" required>
                             <div class="file-indicator" id="xlf-indicator"></div>
                         </div>
                     </div>
@@ -667,10 +677,10 @@ def home():
                     <!-- Graphics ZIP Upload -->
                     <div class="form-group">
                         <label class="form-label">Source Graphics ZIP Archive (.zip)</label>
-                        <div class="dropzone" id="zip-dropzone" onclick="document.getElementById('zip-file').click()">
+                        <div class="dropzone" id="zip-dropzone">
                             <span class="dropzone-icon">🖼️</span>
                             <div class="dropzone-text">Drag & drop your graphics ZIP archive, or <strong>browse</strong></div>
-                            <input type="file" id="zip-file" name="graphics_zip" accept=".zip" style="display:none" onchange="handleFileSelected(this, 'zip-dropzone', 'zip-indicator')" required>
+                            <input type="file" id="zip-file" name="graphics_zip" accept=".zip" onchange="handleFileSelected(this, 'zip-dropzone', 'zip-indicator')" required>
                             <div class="file-indicator" id="zip-indicator"></div>
                         </div>
                     </div>
@@ -761,28 +771,22 @@ def home():
     </div>
 
     <script>
-        // Setup Drag & Drop behavior
-        ['xlf-dropzone', 'zip-dropzone'].forEach(id => {{
-            const dropzone = document.getElementById(id);
-            const input = dropzone.querySelector('input[type="file"]');
+        // Setup Drag & Drop behavior using input overlays
+        ['xlf-file', 'zip-file'].forEach(id => {{
+            const input = document.getElementById(id);
+            const dropzone = input.closest('.dropzone');
 
-            dropzone.addEventListener('dragover', (e) => {{
+            input.addEventListener('dragover', (e) => {{
                 e.preventDefault();
                 dropzone.classList.add('dragover');
             }});
 
-            dropzone.addEventListener('dragleave', () => {{
+            input.addEventListener('dragleave', () => {{
                 dropzone.classList.remove('dragover');
             }});
 
-            dropzone.addEventListener('drop', (e) => {{
-                e.preventDefault();
+            input.addEventListener('drop', () => {{
                 dropzone.classList.remove('dragover');
-                if (e.dataTransfer.files.length > 0) {{
-                    input.files = e.dataTransfer.files;
-                    const changeEvent = new Event('change');
-                    input.dispatchEvent(changeEvent);
-                }}
             }});
         }});
 
