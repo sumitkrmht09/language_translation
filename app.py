@@ -130,11 +130,7 @@ with col_setup:
         index=0
     )
     
-    dry_run = st.checkbox(
-        "Dry Run Mode", 
-        value=False,
-        help="Parses structure and identifies segments/graphics without calling OpenAI translation API."
-    )
+
     
     st.markdown('<br>', unsafe_allow_html=True)
     start_btn = st.button("Translate & Process Graphics", use_container_width=True, type="primary")
@@ -239,7 +235,7 @@ if start_btn:
         translation_args = argparse.Namespace(
             resume=False,
             batch_size=40,
-            dry_run=dry_run,
+            dry_run=False,
             graphics_source_folder=str(graphics_src_dir)
         )
         
