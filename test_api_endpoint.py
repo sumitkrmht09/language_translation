@@ -90,6 +90,16 @@ def test_api():
         with zipfile.ZipFile(OUTPUT_ZIP_PATH, 'r') as zf:
             zf.extractall(DOWNLOAD_DIR)
             
+        # Replicate graphics and text_conversion_file to a double-nested path
+        double_nested_dir = EXTRACTION_DIR / EXTRACTION_DIR.name
+        double_nested_dir.mkdir(parents=True, exist_ok=True)
+        if (EXTRACTION_DIR / "graphics").exists():
+            import shutil
+            shutil.copytree(EXTRACTION_DIR / "graphics", double_nested_dir / "graphics", dirs_exist_ok=True)
+        if (EXTRACTION_DIR / "text_conversion_file").exists():
+            import shutil
+            shutil.copytree(EXTRACTION_DIR / "text_conversion_file", double_nested_dir / "text_conversion_file", dirs_exist_ok=True)
+            
         # 5. List the extracted directory contents
         print("\nExtracted ZIP Files:")
         for root, _, files in os.walk(EXTRACTION_DIR):

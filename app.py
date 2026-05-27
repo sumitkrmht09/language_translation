@@ -16,6 +16,16 @@ from pathlib import Path
 import shutil
 import uuid
 import zipfile
+import os
+
+def get_downloads_dir() -> Path:
+    p = Path(os.environ.get("USERPROFILE", "C:/Users/Lenovo")) / "Downloads"
+    if p.exists():
+        return p
+    p = Path.home() / "Downloads"
+    if p.exists():
+        return p
+    return Path("C:/Users/Lenovo/Downloads")
 
 from image_ocr_translator import process_image, process_pdf
 
@@ -160,6 +170,40 @@ async def translate_xliff_endpoint(
             shutil.rmtree(unzip_dest, ignore_errors=True)
         with zipfile.ZipFile(zip_out_path, 'r') as zip_ref:
             zip_ref.extractall(OUTPUT_DIR)
+
+        # Ensure server-side extracted folder has double-nested graphics/text_conversion_file as well
+        srv_double_nested = unzip_dest / zip_name
+        srv_double_nested.mkdir(parents=True, exist_ok=True)
+        if (unzip_dest / "graphics").exists():
+            shutil.copytree(unzip_dest / "graphics", srv_double_nested / "graphics", dirs_exist_ok=True)
+        if (unzip_dest / "text_conversion_file").exists():
+            shutil.copytree(unzip_dest / "text_conversion_file", srv_double_nested / "text_conversion_file", dirs_exist_ok=True)
+
+        # 8. Automatically copy/extract to the local user's Downloads folder
+        try:
+            downloads_dir = get_downloads_dir()
+            if downloads_dir.exists():
+                # Copy ZIP file
+                shutil.copy2(zip_out_path, downloads_dir / f"{zip_name}.zip")
+                
+                # Extract ZIP directly to Downloads (this automatically creates the folder)
+                dl_unzip_dest = downloads_dir / zip_name
+                if dl_unzip_dest.exists():
+                    shutil.rmtree(dl_unzip_dest, ignore_errors=True)
+                with zipfile.ZipFile(zip_out_path, 'r') as zip_ref:
+                    zip_ref.extractall(downloads_dir)
+                    
+                # Mirror the double-nested graphics/text_conversion_file directories inside Downloads as well
+                double_nested_dir = dl_unzip_dest / zip_name
+                double_nested_dir.mkdir(parents=True, exist_ok=True)
+                if (dl_unzip_dest / "graphics").exists():
+                    shutil.copytree(dl_unzip_dest / "graphics", double_nested_dir / "graphics", dirs_exist_ok=True)
+                if (dl_unzip_dest / "text_conversion_file").exists():
+                    shutil.copytree(dl_unzip_dest / "text_conversion_file", double_nested_dir / "text_conversion_file", dirs_exist_ok=True)
+                    
+                print(f"Automatically placed ZIP and double-nested folder in: {downloads_dir}")
+        except Exception as e:
+            print(f"Failed to copy/unzip to local Downloads folder: {e}")
 
         # Clean up temporary upload session directory and unique_id folder
         shutil.rmtree(session_dir, ignore_errors=True)
