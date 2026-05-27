@@ -141,7 +141,8 @@ async def translate_xliff_endpoint(
             return {"error": "Translation failed. Check backend logs."}
 
         # 6. Create output ZIP containing the language-rooted folder prefix
-        zip_out_path = OUTPUT_DIR / f"{unique_id}_translated.zip"
+        zip_name = f"translated_{target_lang}_{xlf_name_without_ext}"
+        zip_out_path = OUTPUT_DIR / f"{zip_name}.zip"
         zip_root = output_root
         count = 0
         with zipfile.ZipFile(zip_out_path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -153,23 +154,20 @@ async def translate_xliff_endpoint(
                 zf.write(path, arcname=arcname)
                 count += 1
 
-        # Clean up temporary upload session directory
+        # 7. Unzip the folder to the same location (OUTPUT_DIR)
+        unzip_dest = OUTPUT_DIR / zip_name
+        if unzip_dest.exists():
+            shutil.rmtree(unzip_dest, ignore_errors=True)
+        with zipfile.ZipFile(zip_out_path, 'r') as zip_ref:
+            zip_ref.extractall(OUTPUT_DIR)
+
+        # Clean up temporary upload session directory and unique_id folder
         shutil.rmtree(session_dir, ignore_errors=True)
         shutil.rmtree(OUTPUT_DIR / unique_id, ignore_errors=True)
 
-        # Register cleanup of the zip file in background task
-        def cleanup_file(path: Path):
-            if path.exists():
-                try:
-                    path.unlink()
-                except Exception:
-                    pass
-
-        background_tasks.add_task(cleanup_file, zip_out_path)
-
         return FileResponse(
             path=str(zip_out_path),
-            filename=f"translated_{target_lang}_{file.filename.replace('.xlf', '').replace('.xliff', '')}.zip",
+            filename=f"{zip_name}.zip",
             media_type='application/zip'
         )
 
