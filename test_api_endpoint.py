@@ -50,7 +50,7 @@ def test_api():
     temp_zip_path = create_temp_graphics_zip(GRAPHICS_DIR)
     
     try:
-        # 2. Call the FastAPI endpoint
+        # 2. Call the FastAPI endpoint (now asynchronous)
         print(f"Sending POST request to {API_URL} (dry_run={DRY_RUN}) ...")
         
         with open(XLF_PATH, "rb") as xlf_file, open(temp_zip_path, "rb") as zip_file:
@@ -63,7 +63,6 @@ def test_api():
                 "dry_run": str(DRY_RUN)
             }
             
-            # Disable timeout limit for long OCR tasks
             response = httpx.post(API_URL, files=files, data=data, timeout=None)
             
         if response.status_code != 200:
@@ -74,11 +73,50 @@ def test_api():
                 print(response.text[:1000])
             return
             
-        print("API Response received successfully!")
+        res_data = response.json()
+        if "job_id" not in res_data:
+            print("Error: No job_id returned", res_data)
+            return
+            
+        job_id = res_data["job_id"]
+        print(f"Job initiated successfully! Job ID: {job_id}")
         
-        # 3. Save the response ZIP
+        # 3. Poll status endpoint
+        import time
+        status_url = f"http://127.0.0.1:8000/status/{job_id}"
+        download_url = f"http://127.0.0.1:8000/download/{job_id}"
+        
+        print("Polling job status...")
+        while True:
+            status_res = httpx.get(status_url)
+            if status_res.status_code != 200:
+                print(f"Error checking status: {status_res.text}")
+                return
+                
+            job = status_res.json()
+            status = job.get("status")
+            progress = job.get("progress", 0)
+            message = job.get("message", "")
+            
+            print(f"  [{status.upper()}] Progress: {progress}% | Message: {message}")
+            
+            if status == "completed":
+                break
+            elif status == "failed":
+                print("Job failed!")
+                return
+                
+            time.sleep(1.5)
+            
+        # 4. Download final package
+        print("Downloading final package...")
+        dl_res = httpx.get(download_url, timeout=None)
+        if dl_res.status_code != 200:
+            print(f"Failed to download zip: {dl_res.text}")
+            return
+            
         DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
-        OUTPUT_ZIP_PATH.write_bytes(response.content)
+        OUTPUT_ZIP_PATH.write_bytes(dl_res.content)
         print(f"Saved deliverable zip to: {OUTPUT_ZIP_PATH}")
         
         # 4. Extract the ZIP directly to DOWNLOAD_DIR

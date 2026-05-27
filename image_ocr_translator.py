@@ -1037,6 +1037,7 @@ def process_xlf_references(
     rename_with_lang: bool = True,
     out_xlf_path: Optional[Path] = None,
     src_graphics_folder: Optional[Path] = None,  # Hook for user provided folder
+    progress_callback = None,
 ) -> Dict[str, str]:
     xlf_path = Path(xlf_path)
     base_dir = xlf_path.parent
@@ -1054,7 +1055,14 @@ def process_xlf_references(
     print(f"{'='*60}")
 
     refs = extract_reference_paths(xlf_path)
-    print(f"\n  Total unique graphic refs: {len(refs)}")
+    total_graphics = len(refs)
+    print(f"\n  Total unique graphic refs: {total_graphics}")
+
+    if progress_callback:
+        progress_callback("Analyzing graphic references...", 0, max(1, total_graphics), {
+            "total_graphics": total_graphics,
+            "converted_graphics": 0
+        })
 
     if not refs:
         print("  Nothing to process.")
@@ -1068,8 +1076,9 @@ def process_xlf_references(
     print(f"  Lang suffix  : {rename_with_lang}\n")
 
     mapping: Dict[str, str] = {}
+    converted_count = 0
 
-    for di_raw, abs_path_str in refs:
+    for idx, (di_raw, abs_path_str) in enumerate(refs, 1):
         abs_path = Path(abs_path_str)
         di_fs    = _parse_mif_path(di_raw)      
         print(f"\n  File     : {abs_path.name}")
@@ -1104,6 +1113,16 @@ def process_xlf_references(
 
         if not found_src_path:
             print(f"  ✗ Image file not found inside uploaded folder hierarchy: {abs_path.name}")
+            if progress_callback:
+                progress_callback(
+                    f"Graphic not found: {abs_path.name}",
+                    idx,
+                    total_graphics,
+                    {
+                        "total_graphics": total_graphics,
+                        "converted_graphics": converted_count
+                    }
+                )
             continue
 
         print(f"  ✓ Located image in uploaded Graphics folder -> {found_src_path}")
@@ -1153,6 +1172,18 @@ def process_xlf_references(
             mapping[abs_path.name]   = mif_ref   
             mapping[di_fs]           = mif_ref   
             mapping[di_raw]          = mif_ref   
+
+            converted_count += 1
+            if progress_callback:
+                progress_callback(
+                    f"Processed graphic {idx}/{total_graphics}: {abs_path.name}",
+                    idx,
+                    total_graphics,
+                    {
+                        "total_graphics": total_graphics,
+                        "converted_graphics": converted_count
+                    }
+                )
 
         except Exception as e:
             print(f"  ✗ Error on {abs_path.name}: {e}")

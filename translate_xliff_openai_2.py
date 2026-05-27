@@ -994,7 +994,7 @@ def update_xlf_references(xlf_path, path_mapping):
     log.info(f"update_xlf_references: saved updated XLF → {xlf_path}")
 
 
-def translate_file(input_path, output_root, target_lang, args, model_to_use):
+def translate_file(input_path, output_root, target_lang, args, model_to_use, progress_callback=None):
     input_path  = Path(input_path)
     output_root = Path(output_root)
 
@@ -1018,6 +1018,15 @@ def translate_file(input_path, output_root, target_lang, args, model_to_use):
         (skipped if cls == "skip" else to_translate).append(u)
     n_safety = sum(1 for u in to_translate if u["_class"] == "safety")
     log.info(f"translate={len(to_translate)} skip={len(skipped)} safety={n_safety}")
+
+    total_segments = len(all_units)
+    if progress_callback:
+        progress_callback("Analyzing segments...", 0, 1, {
+            "total_segments": total_segments,
+            "translated_segments": 0,
+            "total_graphics": 0,
+            "converted_graphics": 0
+        })
 
     ckpt = str(output_root.parent / f"{input_path.stem}.checkpoint.json")
     all_trans = {}
@@ -1047,11 +1056,35 @@ def translate_file(input_path, output_root, target_lang, args, model_to_use):
         all_trans.update(result)
         if not args.dry_run:
             save_checkpoint(ckpt, all_trans)
+        
+        translated_count = len([u for u in all_units if u["id"] in all_trans])
+        if progress_callback:
+            progress_callback(
+                f"Translating segments batch {i}/{len(batches)}...",
+                i,
+                len(batches),
+                {
+                    "total_segments": total_segments,
+                    "translated_segments": translated_count
+                }
+            )
+
         if i < len(batches):
             time.sleep(BATCH_DELAY)
 
     for u in skipped:
         all_trans[u["id"]] = u["source"]
+
+    if progress_callback:
+        progress_callback(
+            "Writing translation back to XML...",
+            total_segments,
+            total_segments,
+            {
+                "total_segments": total_segments,
+                "translated_segments": total_segments
+            }
+        )
 
     set_header_lang(root, ns, target_lang)
     n = write_back(all_units, all_trans, ns, target_lang)
@@ -1083,6 +1116,7 @@ def translate_file(input_path, output_root, target_lang, args, model_to_use):
             rename_with_lang=False,  
             out_xlf_path=xlf_out_path,
             src_graphics_folder=getattr(args, "graphics_source_folder", None),  # Pass uploaded input target 
+            progress_callback=progress_callback,
         )
 
         if path_mapping:
