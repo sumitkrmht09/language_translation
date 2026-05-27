@@ -611,6 +611,51 @@ def _get_fitz_fontname(font_name: str) -> str:
         return "hebi"   if ("helv" in fn or "arial" in fn) else "tiit"
     return "helv"
 
+def _find_system_font(bold: bool = False) -> Optional[str]:
+    candidates = _FONT_PATHS_BOLD if bold else _FONT_PATHS_REGULAR
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    if bold:
+        for p in _FONT_PATHS_REGULAR:
+            if os.path.exists(p):
+                return p
+    return None
+
+def _get_page_font(page: fitz.Page, bold: bool = False) -> str:
+    bold_str = "B" if bold else "R"
+    fontname = f"F_Arial_{bold_str}"
+    try:
+        font_path = _find_system_font(bold)
+        if font_path and os.path.exists(font_path):
+            page.insert_font(fontname=fontname, fontfile=font_path)
+            return fontname
+    except Exception as e:
+        print(f"      [font] Failed to insert custom font {fontname}: {e}")
+    return "hebo" if bold else "helv"
+
+def _detect_span_alignment(block_bbox: Tuple[float, float, float, float], span_bbox: Tuple[float, float, float, float]) -> int:
+    bx0, by0, bx1, by1 = block_bbox
+    sx0, sy0, sx1, sy1 = span_bbox
+    
+    block_w = bx1 - bx0
+    span_w = sx1 - sx0
+    
+    if block_w <= span_w + 3:
+        return 0
+        
+    left_margin = sx0 - bx0
+    right_margin = bx1 - sx1
+    
+    # If margins are close (within 10% of block width or 4 pixels)
+    if abs(left_margin - right_margin) < max(4.0, block_w * 0.1):
+        return 1
+        
+    if right_margin < left_margin and right_margin < 5:
+        return 2
+        
+    return 0
+
 def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
     spans: List[dict] = []
     seen:  set        = set()
@@ -630,6 +675,7 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
                     "bbox": span["bbox"],
                     "size": span["size"],
                     "font": span.get("font", ""),
+                    "block_bbox": block["bbox"],
                 })
 
     if not spans:
@@ -655,16 +701,56 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
 
     for span, _tr in to_process:
         x0, y0, x1, y1 = span["bbox"]
-        page.add_redact_annot(fitz.Rect(x0, y0 - 1, x1, y1 + 1), fill=(1, 1, 1))
-    page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+        page.add_redact_annot(fitz.Rect(x0, y0 - 1, x1, y1 + 1), fill=False)
+    page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE, graphics=0)
 
     any_changed = False
     for span, translated in to_process:
         x0, y0, x1, y1 = span["bbox"]
+        
+        # Check if the text is bold
+        fn = span.get("font", "").lower()
+        is_bold = "bold" in fn or "black" in fn or "heavy" in fn
+        
+        # Get custom unicode font registered on the page
+        font_ref = _get_page_font(page, bold=is_bold)
+        
+        # Detect text alignment
+        block_bbox = span.get("block_bbox", (x0, y0, x1, y1))
+        align = _detect_span_alignment(block_bbox, span["bbox"])
+        
+        # Measure translated text width using the exact system font if available
+        text_len = None
+        try:
+            font_path = _find_system_font(is_bold)
+            if font_path and os.path.exists(font_path):
+                font_obj = fitz.Font(fontfile=font_path)
+                text_len = font_obj.text_length(translated, fontsize=span["size"])
+        except Exception as e:
+            print(f"      [font-measure] Failed to measure with custom font: {e}")
+
+        if text_len is None:
+            measure_font = "hebo" if is_bold else "helv"
+            try:
+                text_len = fitz.get_text_length(translated, fontname=measure_font, fontsize=span["size"])
+            except Exception:
+                text_len = len(translated) * span["size"] * 0.5
+            
+        # Adjust start point based on alignment
+        if align == 1:  # Center
+            center_x = (x0 + x1) / 2
+            new_x0 = center_x - (text_len / 2)
+            new_x0 = max(block_bbox[0] + 1, new_x0)
+        elif align == 2:  # Right
+            new_x0 = x1 - text_len
+            new_x0 = max(block_bbox[0] + 1, new_x0)
+        else:  # Left
+            new_x0 = x0
+            
         rc = page.insert_text(
-            (x0, y1 - 1), translated,
+            (new_x0, y1 - 1), translated,
             fontsize=span["size"],
-            fontname=_get_fitz_fontname(span["font"]),
+            fontname=font_ref,
             color=(0, 0, 0),
         )
         if rc >= 0:
@@ -788,6 +874,11 @@ def process_pdf(
     for idx in range(len(doc)):
         page = doc[idx]
         print(f"      page {idx+1}/{len(doc)}", flush=True)
+        
+        orig_crop = page.cropbox
+        orig_media = page.mediabox
+        orig_rot = page.rotation
+        
         if _has_real_text(page):
             changed = _process_text_layer_page(page, target_lang)
             print(f"      {'✓' if changed else '-'} "
@@ -796,8 +887,12 @@ def process_pdf(
             changed = _process_image_layer_page(doc, page, target_lang)
             print(f"      {'✓' if changed else '-'} "
                   f"{'image-OCR translated' if changed else 'image-OCR: no text'}")
+                  
         if changed:
             any_changed = True
+            page.set_cropbox(orig_crop)
+            page.set_mediabox(orig_media)
+            page.set_rotation(orig_rot)
 
     if not any_changed:
         print("  - Nothing translated — copying unchanged.")
