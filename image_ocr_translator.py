@@ -715,9 +715,8 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
         # Get custom unicode font registered on the page
         font_ref = _get_page_font(page, bold=is_bold)
         
-        # Detect text alignment
-        block_bbox = span.get("block_bbox", (x0, y0, x1, y1))
-        align = _detect_span_alignment(block_bbox, span["bbox"])
+        # Keep text left-aligned to its original starting point to prevent cell boundary overlaps
+        align = 0
         
         # Measure translated text width using the exact system font if available
         text_len = None
