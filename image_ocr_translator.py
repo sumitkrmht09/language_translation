@@ -745,7 +745,7 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
 
     all_text = " ".join(s["text"] for s in spans)
     if _already_in_target_language(all_text, target_lang):
-        print("      - page already in target language — skipping")
+        print("      - page already in target language - skipping")
         return False
 
     originals    = [s["text"] for s in spans]
@@ -774,40 +774,53 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
         fn = span.get("font", "").lower()
         is_bold = "bold" in fn or "black" in fn or "heavy" in fn
         
-        # Get custom unicode font registered on the page
-        font_ref = _get_page_font(page, bold=is_bold, target_lang=target_lang)
-        
         # Detect text alignment
         block_bbox = span.get("block_bbox", (x0, y0, x1, y1))
         align = _detect_span_alignment(block_bbox, span["bbox"])
         
-        # Measure translated text width using proper CJK estimation
-        is_cjk = any(c in target_lang.lower() for c in ['zh', 'ja', 'ko'])
-        char_width_multiplier = 1.0 if is_cjk else 0.55
-        text_len = len(translated) * span["size"] * char_width_multiplier
+        try:
+            # Render text to transparent high-res PNG to bypass Adobe FrameMaker font embedding issues
+            font = _get_font(int(span["size"] * 4), bold=is_bold, target_lang=target_lang)
+            # Use getbbox for accurate sizing
+            left, top, right, bottom = font.getbbox(translated)
+            text_width = right - left
+            text_height = bottom - top
             
-        # Adjust start point based on alignment
-        if align == 1:  # Center
-            center_x = (x0 + x1) / 2
-            new_x0 = center_x - (text_len / 2)
-            new_x0 = max(block_bbox[0] + 1, new_x0)
-        elif align == 2:  # Right
-            new_x0 = x1 - text_len
-            new_x0 = max(block_bbox[0] + 1, new_x0)
-        else:  # Left
-            new_x0 = x0
+            # Create a transparent PIL image with padding
+            img_w = text_width + 10
+            img_h = text_height + 20
+            img = Image.new("RGBA", (img_w, img_h), (0,0,0,0))
+            draw = ImageDraw.Draw(img)
+            draw.text((5 - left, 10 - top), translated, font=font, fill=(0, 0, 0, 255))
             
-        rc = page.insert_text(
-            (new_x0, y1 - 1), translated,
-            fontsize=span["size"],
-            fontname=font_ref,
-            color=(0, 0, 0),
-        )
-        if rc >= 0:
+            # get image bytes
+            import io
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            img_bytes = buf.getvalue()
+            
+            # Calculate physical dimensions
+            physical_h = y1 - y0
+            physical_w = physical_h * (img_w / img_h)
+            
+            # Adjust start point based on alignment
+            if align == 1:  # Center
+                center_x = (x0 + x1) / 2
+                new_x0 = center_x - (physical_w / 2)
+                new_x0 = max(block_bbox[0] + 1, new_x0)
+            elif align == 2:  # Right
+                new_x0 = x1 - physical_w
+                new_x0 = max(block_bbox[0] + 1, new_x0)
+            else:  # Left
+                new_x0 = x0
+                
+            # Insert the transparent PNG
+            rect = fitz.Rect(new_x0, y0, new_x0 + physical_w, y0 + physical_h)
+            page.insert_image(rect, stream=img_bytes)
             any_changed = True
-            print(f"      ✓ {repr(span['text'][:28])} → {repr(translated[:28])}")
-        else:
-            print(f"      ✗ insert_text rc={rc} for {repr(span['text'][:28])}")
+            print(f"      [rasterized] {repr(span['text'][:28])} -> {repr(translated[:28])}")
+        except Exception as e:
+            print(f"      ? Failed to rasterize text {repr(span['text'][:28])}: {e}")
 
     return any_changed
 
