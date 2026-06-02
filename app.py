@@ -224,9 +224,9 @@ def main():
     max_workers_slider = st.slider(
         "Parallel Processing Workers",
         min_value=1,
-        max_value=10,
+        max_value=5,
         value=2,
-        help="Increase this to translate faster. If you encounter 502 Connection Errors, reduce it to 1."
+        help="If you encounter 502 Connection Errors, reduce this to 1 to save server memory."
     )
 
     st.markdown('<br>', unsafe_allow_html=True)
@@ -246,7 +246,7 @@ def main():
                         with open(dl["path"], "rb") as f:
                             st.download_button(
                                 label=dl["label"],
-                                data=f.read(),
+                                data=f,
                                 file_name=dl["file_name"],
                                 mime=dl["mime"],
                                 use_container_width=True,
@@ -304,7 +304,7 @@ def main():
                 start_time = time.time()
                 completed_tasks = 0
                 
-                with concurrent.futures.ProcessPoolExecutor(max_workers=min(max_workers_slider, len(tasks))) as executor:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=min(max_workers_slider, len(tasks))) as executor:
                     future_to_task = {
                         executor.submit(
                             process_language, 
