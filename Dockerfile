@@ -2,7 +2,7 @@
 FROM python:3.10-slim
 
 # Install git so the app can query the git commit hash at runtime
-RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+# RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 
 # Set environment variables to prevent Python from writing pyc files and to buffer stdout/stderr
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -32,5 +32,5 @@ COPY . /app/
 # Expose the network port
 EXPOSE 8000
 
-# Start the Streamlit application
-CMD ["streamlit", "run", "app.py", "--server.port", "8000", "--server.address", "0.0.0.0"]
+# Start the FastAPI application
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

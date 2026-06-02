@@ -1,5 +1,6 @@
 # image_ocr_translator.py
 import os
+import gc
 import re
 import io
 import html
@@ -643,7 +644,8 @@ def _draw_blocks(pil_img: Image.Image, blocks: list, target_lang: str = "en") ->
 
         except Exception as e:
             print(f"      [draw] skipping block: {e}")
-
+    del block_info
+    gc.collect()
     return cleaned_img
 
 def _extract_pdf_text(doc: fitz.Document, max_chars: int = 2000) -> str:
@@ -863,6 +865,8 @@ def _process_image_layer_page(doc: fitz.Document,
         except Exception:
             pass
     page.insert_image(page.rect, stream=buf.getvalue(), keep_proportion=False)
+    del pil_img, buf, pix
+    gc.collect()
     return True
 
 def process_image(
@@ -910,6 +914,8 @@ def process_image(
     if save_fmt == "JPEG":
         kw["quality"] = 95
     pil_img.save(str(out_path), **kw)
+    del pil_img
+    gc.collect()
     print(f"  ✓ Saved → {new_name}")
     return new_name
 
@@ -980,6 +986,7 @@ def process_pdf(
     doc.save(tmp, garbage=4, deflate=True)
     doc.close()
     os.replace(tmp, str(out_path))
+    gc.collect()
     print(f"  ✓ Saved → {new_name}")
     return new_name
 

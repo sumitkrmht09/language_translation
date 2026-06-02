@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FrameMaker Translation Studio</title>
+    
+    <!-- Premium Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Stylesheet -->
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="glass-bg-glow"></div>
+    <div class="glass-bg-glow secondary"></div>
+
+    <div class="container">
+        <!-- Header -->
+        <header class="app-header">
+            <h1 id="app-title">FrameMaker <span class="gradient-text">Translation Studio</span></h1>
+            <p class="app-subtitle">Translate FrameMaker XLIFF files and update associated graphics dynamically</p>
+        </header>
+
+        <!-- Main Form -->
+        <main class="app-content">
+            <form id="translation-form" class="studio-grid" onsubmit="return false;">
+                
+                <!-- Left Column: Upload Section -->
+                <section class="studio-card upload-section">
+                    <h2 class="card-title">1. Upload Files</h2>
+                    
+                    <!-- XLIFF Upload -->
+                    <div class="dropzone" id="xliff-dropzone">
+                        <input type="file" id="xlf_files" multiple accept=".xlf,.xliff" class="file-input">
+                        <div class="dropzone-content">
+                            <div class="icon-wrap">
+                                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                    <polyline points="14 2 14 8 20 8"></polyline>
+                                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                                    <polyline points="10 9 9 9 8 9"></polyline>
+                                </svg>
+                            </div>
+                            <p class="dropzone-text">Drag & drop <strong>XLIFF files</strong> or <span class="browse-link">browse</span></p>
+                            <p class="dropzone-hint">Supports .xlf and .xliff formats</p>
+                        </div>
+                        <div class="file-list" id="xliff-file-list"></div>
+                    </div>
+
+                    <!-- Graphics ZIP Upload -->
+                    <div class="dropzone" id="graphics-dropzone">
+                        <input type="file" id="zip_files" multiple accept=".zip" class="file-input">
+                        <div class="dropzone-content">
+                            <div class="icon-wrap">
+                                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                                    <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                                    <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                                </svg>
+                            </div>
+                            <p class="dropzone-text">Drag & drop <strong>Graphics ZIP</strong> or <span class="browse-link">browse</span></p>
+                            <p class="dropzone-hint">Optional: Source images or figures (.zip)</p>
+                        </div>
+                        <div class="file-list" id="graphics-file-list"></div>
+                    </div>
+                </section>
+
+                <!-- Right Column: Languages & Settings -->
+                <section class="studio-card lang-section">
+                    <div class="lang-header">
+                        <h2 class="card-title">2. Target Languages</h2>
+                        <div class="lang-actions">
+                            <button type="button" class="btn btn-text" id="btn-select-all">Select All</button>
+                            <span class="divider">|</span>
+                            <button type="button" class="btn btn-text" id="btn-clear-all">Clear</button>
+                        </div>
+                    </div>
+
+                    <div class="search-box">
+                        <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+                        <input type="text" id="lang-search" placeholder="Search languages...">
+                    </div>
+
+                    <div class="lang-grid" id="languages-container">
+                        <!-- Loaded dynamically via JavaScript -->
+                        <div class="lang-loader">Loading target languages...</div>
+                    </div>
+
+                    <div class="settings-divider"></div>
+
+                    <!-- Configuration -->
+                    <div class="settings-box">
+                        <h3 class="settings-title">Performance Settings</h3>
+                        <div class="workers-selector">
+                            <span class="workers-label">Concurrent Workers:</span>
+                            <div class="radio-group">
+                                <label class="radio-label">
+                                    <input type="radio" name="max_workers" value="1">
+                                    <span class="radio-btn">1</span>
+                                </label>
+                                <label class="radio-label">
+                                    <input type="radio" name="max_workers" value="2" checked>
+                                    <span class="radio-btn">2</span>
+                                </label>
+                                <label class="radio-label">
+                                    <input type="radio" name="max_workers" value="3">
+                                    <span class="radio-btn">3</span>
+                                </label>
+                            </div>
+                        </div>
+                        <p class="settings-desc">Max 2 workers recommended to stay within the 512MB memory limit on free hosts.</p>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <button type="button" id="btn-submit" class="btn btn-primary" disabled>
+                        <span>Translate & Process</span>
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                            <polyline points="12 5 19 12 12 19"></polyline>
+                        </svg>
+                    </button>
+                </section>
+            </form>
+
+            <!-- Progress & Logs Panel (Initially Hidden) -->
+            <section class="studio-card progress-panel hidden" id="progress-panel">
+                <div class="panel-header">
+                    <h2 class="card-title">Processing Translation</h2>
+                    <span class="status-badge" id="job-status-badge">Processing</span>
+                </div>
+
+                <div class="progress-container">
+                    <div class="progress-bar-wrap">
+                        <div class="progress-bar-fill" id="job-progress-bar" style="width: 0%;"></div>
+                    </div>
+                    <div class="progress-stats">
+                        <span id="job-progress-percent">0%</span>
+                        <span id="job-eta">ETA: Calculating...</span>
+                    </div>
+                </div>
+
+                <div class="languages-status" id="languages-status-list">
+                    <!-- Progress badges per language will render here -->
+                </div>
+
+                <div class="log-console">
+                    <div class="console-header">
+                        <span>Console Output</span>
+                        <button type="button" class="btn btn-text btn-sm" id="btn-clear-console">Clear</button>
+                    </div>
+                    <div class="console-body" id="console-logs">
+                        <!-- Realtime logs from SSE -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Download Deliverables Panel (Initially Hidden) -->
+            <section class="studio-card downloads-panel hidden" id="downloads-panel">
+                <h2 class="card-title">3. Translated Deliverables</h2>
+                <p class="downloads-subtitle">All files have been successfully translated. Download the packages below:</p>
+                
+                <div class="download-grid" id="download-cards-container">
+                    <!-- Cards will be populated here -->
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <p>Made with &hearts; for high-performance localized documentation. Jobs automatically expire after 1 hour.</p>
+        </footer>
+    </div>
+
+    <!-- Script -->
+    <script src="/static/app.js"></script>
+</body>
+</html>
