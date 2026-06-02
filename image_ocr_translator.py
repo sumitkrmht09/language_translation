@@ -669,7 +669,11 @@ def _get_fitz_fontname(font_name: str) -> str:
         return "hebi"   if ("helv" in fn or "arial" in fn) else "tiit"
     return "helv"
 
-def _find_system_font(bold: bool = False) -> Optional[str]:
+def _find_system_font(bold: bool = False, target_lang: str = "en") -> Optional[str]:
+    cjk_path = _get_downloaded_font_path(target_lang, bold)
+    if cjk_path and os.path.exists(cjk_path):
+        return cjk_path
+
     candidates = _FONT_PATHS_BOLD if bold else _FONT_PATHS_REGULAR
     for p in candidates:
         if os.path.exists(p):
@@ -680,11 +684,11 @@ def _find_system_font(bold: bool = False) -> Optional[str]:
                 return p
     return None
 
-def _get_page_font(page: fitz.Page, bold: bool = False) -> str:
+def _get_page_font(page: fitz.Page, bold: bool = False, target_lang: str = "en") -> str:
     bold_str = "B" if bold else "R"
     fontname = f"F_Arial_{bold_str}"
     try:
-        font_path = _find_system_font(bold)
+        font_path = _find_system_font(bold, target_lang=target_lang)
         if font_path and os.path.exists(font_path):
             page.insert_font(fontname=fontname, fontfile=font_path)
             return fontname
@@ -771,7 +775,7 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
         is_bold = "bold" in fn or "black" in fn or "heavy" in fn
         
         # Get custom unicode font registered on the page
-        font_ref = _get_page_font(page, bold=is_bold)
+        font_ref = _get_page_font(page, bold=is_bold, target_lang=target_lang)
         
         # Detect text alignment
         block_bbox = span.get("block_bbox", (x0, y0, x1, y1))
