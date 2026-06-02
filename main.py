@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 from routers import translate, jobs
 from services.job_manager import job_manager
@@ -49,6 +50,15 @@ app = FastAPI(
     description="High-performance, low-RAM translation service for FrameMaker XLIFF & OCR graphics",
     version="1.0.0",
     lifespan=lifespan,
+)
+
+# Enable CORS for all origins to prevent deployment blocks
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Include API routers (prefixes are defined inside each router)
