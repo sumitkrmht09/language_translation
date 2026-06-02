@@ -20,9 +20,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    raise ValueError("OPENAI_API_KEY environment variable not set")
-client = OpenAI(api_key=OPENAI_API_KEY)
+
+def get_openai_client():
+    key = os.environ.get("OPENAI_API_KEY")
+    if not key:
+        raise ValueError("OPENAI_API_KEY environment variable not set. Please configure it in your environment settings.")
+    return OpenAI(api_key=key)
 
 MODEL       = "gpt-4o"
 MAX_TOKENS  = 8096
@@ -451,7 +454,7 @@ def translate_batch(batch, target_lang, sys_prompt, dry_run, model_to_use):
 
     for attempt in range(1, 4):
         try:
-            response = client.chat.completions.create(
+            response = get_openai_client().chat.completions.create(
                 model=model_to_use,
                 max_tokens=MAX_TOKENS,
                 messages=[

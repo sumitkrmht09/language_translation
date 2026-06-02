@@ -36,9 +36,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    raise ValueError("OPENAI_API_KEY environment variable not set")
-client         = OpenAI(api_key=OPENAI_API_KEY)
+
+def get_openai_client():
+    key = os.environ.get("OPENAI_API_KEY")
+    if not key:
+        raise ValueError("OPENAI_API_KEY environment variable not set. Please configure it in your environment settings.")
+    return OpenAI(api_key=key)
+
 MODEL          = "gpt-4o"
 API_TIMEOUT    = 120
 MAX_IMG_DIM    = 3000
@@ -362,7 +366,7 @@ def _ocr_translate(b64_image: str, target_lang: str,
     )
     print(f"      → GPT-4o OCR (timeout={API_TIMEOUT}s) …", flush=True)
     try:
-        response = client.chat.completions.create(
+        response = get_openai_client().chat.completions.create(
             model=MODEL,
             messages=[{"role": "user", "content": [
                 {"type": "text", "text": prompt},
@@ -403,7 +407,7 @@ def _translate_texts_batch(texts: List[str], target_lang: str) -> List[str]:
         + numbered
     )
     try:
-        resp = client.chat.completions.create(
+        resp = get_openai_client().chat.completions.create(
             model=MODEL,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=4000,
