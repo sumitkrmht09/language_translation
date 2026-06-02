@@ -765,11 +765,8 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
 
     for span, _tr in to_process:
         x0, y0, x1, y1 = span["bbox"]
-        # Completely avoid apply_redactions() as it deletes intersecting vector graphics (like table lines).
-        # Instead, just paint a white rectangle over the text ink.
-        # We shrink the width by 1.5 points on each side so it doesn't accidentally paint over the table borders!
-        safe_rect = fitz.Rect(x0 + 1.5, y0, x1 - 1.5, y1)
-        page.draw_rect(safe_rect, color=None, fill=(1, 1, 1), overlay=True)
+        page.add_redact_annot(fitz.Rect(x0, y0 - 1, x1, y1 + 1), cross_out=False)
+    page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE, graphics=0)
 
     any_changed = False
     for span, translated in to_process:
