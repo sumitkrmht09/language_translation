@@ -3,6 +3,7 @@ import shutil
 import uuid
 import zipfile
 import argparse
+import time
 from pathlib import Path
 import streamlit as st
 from dotenv import load_dotenv
@@ -293,9 +294,24 @@ if start_btn:
                 tasks.append((target_lang, job_id, xlf_path, graphics_src_dir, xlf_name_without_ext))
                 
         with st.spinner(f"Processing {len(tasks)} translation tasks sequentially. This will take a while..."):
-            for t in tasks:
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            start_time = time.time()
+            
+            for idx, t in enumerate(tasks):
                 lang = t[0]
                 xlf_name = t[4]
+                
+                elapsed = time.time() - start_time
+                if idx > 0:
+                    avg_time = elapsed / idx
+                    remaining = avg_time * (len(tasks) - idx)
+                    mins, secs = divmod(int(remaining), 60)
+                    time_str = f"Estimated time left: {mins}m {secs}s"
+                else:
+                    time_str = "Calculating estimated time..."
+                    
+                status_text.info(f"**Task {idx+1} of {len(tasks)}** | Language: {LANGUAGES[lang]} | File: {xlf_name} | {time_str}")
                 
                 success, returned_lang, z_path, z_data = process_language(
                     t[0], 
@@ -316,6 +332,11 @@ if start_btn:
                 else:
                     st.error(f"Execution failed for {LANGUAGES[lang]} on {xlf_name}.")
                     overall_success = False
+                    
+                progress_bar.progress((idx + 1) / len(tasks))
+                
+            status_text.empty()
+            progress_bar.empty()
 
         shutil.rmtree(session_dir, ignore_errors=True)
         shutil.rmtree(OUTPUT_DIR / job_id, ignore_errors=True)
