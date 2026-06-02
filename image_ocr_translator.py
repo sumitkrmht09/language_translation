@@ -763,7 +763,7 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
 
     for span, _tr in to_process:
         x0, y0, x1, y1 = span["bbox"]
-        page.add_redact_annot(fitz.Rect(x0, y0 - 1, x1, y1 + 1), fill=(1, 1, 1))
+        page.add_redact_annot(fitz.Rect(x0, y0 - 1, x1, y1 + 1), cross_out=False)
     page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE, graphics=0)
 
     any_changed = False
@@ -781,12 +781,10 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
         block_bbox = span.get("block_bbox", (x0, y0, x1, y1))
         align = _detect_span_alignment(block_bbox, span["bbox"])
         
-        # Measure translated text width
-        measure_font = "hebo" if is_bold else "helv"
-        try:
-            text_len = fitz.get_text_length(translated, fontname=measure_font, fontsize=span["size"])
-        except Exception:
-            text_len = len(translated) * span["size"] * 0.5
+        # Measure translated text width using proper CJK estimation
+        is_cjk = any(c in target_lang.lower() for c in ['zh', 'ja', 'ko'])
+        char_width_multiplier = 1.0 if is_cjk else 0.55
+        text_len = len(translated) * span["size"] * char_width_multiplier
             
         # Adjust start point based on alignment
         if align == 1:  # Center
