@@ -345,7 +345,6 @@ if start_btn:
                         "mime": "application/zip",
                         "key": f"dl_{target_lang}_{job_id}"
                     })
-                    render_downloads()
                     
             except Exception as e:
                 st.error(f"Execution Error for {target_lang}: {e}")
@@ -365,3 +364,5 @@ if start_btn:
             st.balloons()
         else:
             status_text.warning("Completed with some errors. Check console logs.")
+            
+        render_downloads()
