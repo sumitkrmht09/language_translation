@@ -127,40 +127,38 @@ _DOWNLOADED_FONTS = {}
 
 def _get_downloaded_font_path(target_lang: str, bold: bool) -> str:
     lang_root = target_lang.lower()
+    weight = "Bold" if bold else "Regular"
     
     if "zh-tw" in lang_root or "zh-hk" in lang_root:
-        family = "notosanstc"
-        base = "NotoSansTC"
+        url = f"https://github.com/notofonts/noto-cjk/raw/main/Sans/SubsetOTF/TC/NotoSansTC-{weight}.otf"
+        filename = f"NotoSansTC-{weight}.otf"
     elif "zh" in lang_root:
-        family = "notosanssc"
-        base = "NotoSansSC"
+        url = f"https://github.com/notofonts/noto-cjk/raw/main/Sans/SubsetOTF/SC/NotoSansSC-{weight}.otf"
+        filename = f"NotoSansSC-{weight}.otf"
     elif "ja" in lang_root:
-        family = "notosansjp"
-        base = "NotoSansJP"
+        url = f"https://github.com/notofonts/noto-cjk/raw/main/Sans/SubsetOTF/JP/NotoSansJP-{weight}.otf"
+        filename = f"NotoSansJP-{weight}.otf"
     elif "ko" in lang_root:
-        family = "notosanskr"
-        base = "NotoSansKR"
+        url = f"https://github.com/notofonts/noto-cjk/raw/main/Sans/SubsetOTF/KR/NotoSansKR-{weight}.otf"
+        filename = f"NotoSansKR-{weight}.otf"
     elif "ar" in lang_root:
-        family = "notosansarabic"
-        base = "NotoSansArabic"
+        url = f"https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansArabic/NotoSansArabic-{weight}.ttf"
+        filename = f"NotoSansArabic-{weight}.ttf"
     else:
-        family = "notosans"
-        base = "NotoSans"
+        url = f"https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSans/NotoSans-{weight}.ttf"
+        filename = f"NotoSans-{weight}.ttf"
         
-    weight = "Bold" if bold else "Regular"
-    filename = f"{base}-{weight}.ttf"
-    key = f"{family}_{weight}"
+    key = filename
 
     if key in _DOWNLOADED_FONTS:
         return _DOWNLOADED_FONTS[key]
         
-    url = f"https://github.com/google/fonts/raw/main/ofl/{family}/{filename}"
     path = Path(__file__).parent / filename
     
     if not path.exists():
         import urllib.request
         try:
-            print(f"Downloading fallback font {filename}...")
+            print(f"Downloading robust font {filename}...")
             urllib.request.urlretrieve(url, path)
         except Exception as e:
             print(f"Failed to download font: {e}")
