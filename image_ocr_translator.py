@@ -123,9 +123,41 @@ _FONT_PATHS_BOLD = [
     "arialbd.ttf",
 ]
 
+_DOWNLOADED_FONTS = {}
+
+def _get_cjk_font_path(bold: bool) -> str:
+    key = "bold" if bold else "regular"
+    if key in _DOWNLOADED_FONTS:
+        return _DOWNLOADED_FONTS[key]
+        
+    url = "https://github.com/google/fonts/raw/main/ofl/notosanssc/NotoSansSC-Bold.ttf" if bold else "https://github.com/google/fonts/raw/main/ofl/notosanssc/NotoSansSC-Regular.ttf"
+    filename = "NotoSansSC-Bold.ttf" if bold else "NotoSansSC-Regular.ttf"
+    path = Path(__file__).parent / filename
+    
+    if not path.exists():
+        import urllib.request
+        try:
+            print(f"Downloading fallback font {filename}...")
+            urllib.request.urlretrieve(url, path)
+        except Exception as e:
+            print(f"Failed to download font: {e}")
+            pass
+            
+    _DOWNLOADED_FONTS[key] = str(path)
+    return str(path)
+
 def _get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
     size = max(MIN_FONT, size)
     candidates = _FONT_PATHS_BOLD if bold else _FONT_PATHS_REGULAR
+    
+    cjk_path = _get_cjk_font_path(bold)
+    if bold:
+        cjk_candidates = [cjk_path, "C:/Windows/Fonts/msyhbd.ttc", "C:/Windows/Fonts/malgunbd.ttf", "C:/Windows/Fonts/meiryob.ttc"]
+    else:
+        cjk_candidates = [cjk_path, "C:/Windows/Fonts/msyh.ttc", "C:/Windows/Fonts/malgun.ttf", "C:/Windows/Fonts/meiryo.ttc"]
+        
+    candidates = cjk_candidates + candidates
+
     for p in candidates:
         try:
             return ImageFont.truetype(p, size)
