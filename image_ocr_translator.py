@@ -567,6 +567,8 @@ def _draw_blocks(pil_img: Image.Image, blocks: list, target_lang: str = "en") ->
     block_info: List[dict] = []
     for item in blocks:
         try:
+            if not item.get("requires_translation", True):
+                continue
             original   = item.get("original", "") or ""
             translated = item.get("translated") or item.get("text", "") or ""
             if not translated.strip() or translated.strip() == original.strip():
