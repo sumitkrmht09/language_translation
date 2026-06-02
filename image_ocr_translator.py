@@ -849,7 +849,7 @@ def _process_image_layer_page(doc: fitz.Document,
     if not blocks:
         return False
 
-    if all((b.get("translated") or "").strip() == (b.get("original") or "").strip()
+    if all(not b.get("requires_translation", True) or (b.get("translated") or "").strip() == (b.get("original") or "").strip()
            for b in blocks):
         print("      - all OCR blocks unchanged")
         return False
@@ -896,7 +896,7 @@ def process_image(
         shutil.copy2(str(source_path), str(out_path))
         return new_name
 
-    if all((b.get("translated") or "").strip() == (b.get("original") or "").strip()
+    if all(not b.get("requires_translation", True) or (b.get("translated") or "").strip() == (b.get("original") or "").strip()
            for b in blocks):
         print("  - No text required translation — copying unchanged.")
         shutil.copy2(str(source_path), str(out_path))
