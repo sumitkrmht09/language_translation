@@ -701,7 +701,7 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
 
     for span, _tr in to_process:
         x0, y0, x1, y1 = span["bbox"]
-        page.add_redact_annot(fitz.Rect(x0, y0 - 1, x1, y1 + 1), fill=False)
+        page.add_redact_annot(fitz.Rect(x0, y0 - 1, x1, y1 + 1), fill=(1, 1, 1))
     page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE, graphics=0)
 
     any_changed = False
@@ -715,25 +715,16 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
         # Get custom unicode font registered on the page
         font_ref = _get_page_font(page, bold=is_bold)
         
-        # Keep text left-aligned to its original starting point to prevent cell boundary overlaps
-        align = 0
+        # Detect text alignment
+        block_bbox = span.get("block_bbox", (x0, y0, x1, y1))
+        align = _detect_span_alignment(block_bbox, span["bbox"])
         
-        # Measure translated text width using the exact system font if available
-        text_len = None
+        # Measure translated text width
+        measure_font = "hebo" if is_bold else "helv"
         try:
-            font_path = _find_system_font(is_bold)
-            if font_path and os.path.exists(font_path):
-                font_obj = fitz.Font(fontfile=font_path)
-                text_len = font_obj.text_length(translated, fontsize=span["size"])
-        except Exception as e:
-            print(f"      [font-measure] Failed to measure with custom font: {e}")
-
-        if text_len is None:
-            measure_font = "hebo" if is_bold else "helv"
-            try:
-                text_len = fitz.get_text_length(translated, fontname=measure_font, fontsize=span["size"])
-            except Exception:
-                text_len = len(translated) * span["size"] * 0.5
+            text_len = fitz.get_text_length(translated, fontname=measure_font, fontsize=span["size"])
+        except Exception:
+            text_len = len(translated) * span["size"] * 0.5
             
         # Adjust start point based on alignment
         if align == 1:  # Center
