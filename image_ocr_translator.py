@@ -765,7 +765,11 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
 
     for span, _tr in to_process:
         x0, y0, x1, y1 = span["bbox"]
-        page.add_redact_annot(fitz.Rect(x0, y0 - 1, x1, y1 + 1), cross_out=False)
+        # Do not expand the rect to avoid touching table lines
+        annot = page.add_redact_annot(fitz.Rect(x0, y0, x1, y1), cross_out=False)
+        # Explicitly remove the default redaction border (stroke) to prevent "additional border lines" from being drawn
+        annot.set_colors(stroke=None, fill=None)
+        annot.update()
     page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE, graphics=0)
 
     any_changed = False
@@ -800,7 +804,10 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
             # Draw text using Left-Baseline anchor so we know exactly where the baseline is
             anchor_x = padding_x - left
             anchor_y = padding_y - top
-            draw.text((anchor_x, anchor_y), translated, font=font, fill=(0, 0, 0, 255), anchor="ls")
+            # Add a white stroke (halo) to the text so that if it crosses a table border, 
+            # the text is clearly readable and the border doesn't slice through the black ink.
+            sw = max(1, int(1.5 * zoom))
+            draw.text((anchor_x, anchor_y), translated, font=font, fill=(0, 0, 0, 255), anchor="ls", stroke_width=sw, stroke_fill=(255, 255, 255, 255))
             
             # get image bytes
             import io
