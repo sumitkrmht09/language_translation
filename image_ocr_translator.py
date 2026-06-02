@@ -780,18 +780,21 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
         
         try:
             # Render text to transparent high-res PNG to bypass Adobe FrameMaker font embedding issues
-            font = _get_font(int(span["size"] * 4), bold=is_bold, target_lang=target_lang)
+            zoom = 4.0
+            font = _get_font(int(span["size"] * zoom), bold=is_bold, target_lang=target_lang)
             # Use getbbox for accurate sizing
             left, top, right, bottom = font.getbbox(translated)
             text_width = right - left
             text_height = bottom - top
             
             # Create a transparent PIL image with padding
-            img_w = text_width + 10
-            img_h = text_height + 20
+            padding_x = 10
+            padding_y = 10
+            img_w = text_width + (padding_x * 2)
+            img_h = text_height + (padding_y * 2)
             img = Image.new("RGBA", (img_w, img_h), (0,0,0,0))
             draw = ImageDraw.Draw(img)
-            draw.text((5 - left, 10 - top), translated, font=font, fill=(0, 0, 0, 255))
+            draw.text((padding_x - left, padding_y - top), translated, font=font, fill=(0, 0, 0, 255))
             
             # get image bytes
             import io
@@ -799,23 +802,32 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
             img.save(buf, format="PNG")
             img_bytes = buf.getvalue()
             
-            # Calculate physical dimensions
-            physical_h = y1 - y0
-            physical_w = physical_h * (img_w / img_h)
+            # Calculate exact physical dimensions based on zoom factor
+            physical_w = img_w / zoom
+            physical_h = img_h / zoom
+            
+            # Calculate text ink dimensions in physical points
+            ink_w = text_width / zoom
             
             # Adjust start point based on alignment
             if align == 1:  # Center
                 center_x = (x0 + x1) / 2
-                new_x0 = center_x - (physical_w / 2)
-                new_x0 = max(block_bbox[0] + 1, new_x0)
+                # Center the actual ink
+                ink_x0 = center_x - (ink_w / 2)
+                new_x0 = max(block_bbox[0] + 1, ink_x0) - (padding_x / zoom)
             elif align == 2:  # Right
-                new_x0 = x1 - physical_w
-                new_x0 = max(block_bbox[0] + 1, new_x0)
+                ink_x0 = x1 - ink_w
+                new_x0 = max(block_bbox[0] + 1, ink_x0) - (padding_x / zoom)
             else:  # Left
-                new_x0 = x0
+                new_x0 = x0 - (padding_x / zoom)
+                
+            # Vertically center the text ink based on original bounding box height
+            ink_h = text_height / zoom
+            center_y = (y0 + y1) / 2
+            new_y0 = center_y - (physical_h / 2)
                 
             # Insert the transparent PNG
-            rect = fitz.Rect(new_x0, y0, new_x0 + physical_w, y0 + physical_h)
+            rect = fitz.Rect(new_x0, new_y0, new_x0 + physical_w, new_y0 + physical_h)
             page.insert_image(rect, stream=img_bytes)
             any_changed = True
             print(f"      [rasterized] {repr(span['text'][:28])} -> {repr(translated[:28])}")
