@@ -125,13 +125,36 @@ _FONT_PATHS_BOLD = [
 
 _DOWNLOADED_FONTS = {}
 
-def _get_cjk_font_path(bold: bool) -> str:
-    key = "bold" if bold else "regular"
+def _get_downloaded_font_path(target_lang: str, bold: bool) -> str:
+    lang_root = target_lang.lower()
+    
+    if "zh-tw" in lang_root or "zh-hk" in lang_root:
+        family = "notosanstc"
+        base = "NotoSansTC"
+    elif "zh" in lang_root:
+        family = "notosanssc"
+        base = "NotoSansSC"
+    elif "ja" in lang_root:
+        family = "notosansjp"
+        base = "NotoSansJP"
+    elif "ko" in lang_root:
+        family = "notosanskr"
+        base = "NotoSansKR"
+    elif "ar" in lang_root:
+        family = "notosansarabic"
+        base = "NotoSansArabic"
+    else:
+        family = "notosans"
+        base = "NotoSans"
+        
+    weight = "Bold" if bold else "Regular"
+    filename = f"{base}-{weight}.ttf"
+    key = f"{family}_{weight}"
+
     if key in _DOWNLOADED_FONTS:
         return _DOWNLOADED_FONTS[key]
         
-    url = "https://github.com/google/fonts/raw/main/ofl/notosanssc/NotoSansSC-Bold.ttf" if bold else "https://github.com/google/fonts/raw/main/ofl/notosanssc/NotoSansSC-Regular.ttf"
-    filename = "NotoSansSC-Bold.ttf" if bold else "NotoSansSC-Regular.ttf"
+    url = f"https://github.com/google/fonts/raw/main/ofl/{family}/{filename}"
     path = Path(__file__).parent / filename
     
     if not path.exists():
@@ -141,20 +164,23 @@ def _get_cjk_font_path(bold: bool) -> str:
             urllib.request.urlretrieve(url, path)
         except Exception as e:
             print(f"Failed to download font: {e}")
-            pass
+            return ""
             
     _DOWNLOADED_FONTS[key] = str(path)
     return str(path)
 
-def _get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
+def _get_font(size: int, bold: bool = False, target_lang: str = "en") -> ImageFont.FreeTypeFont:
     size = max(MIN_FONT, size)
     candidates = _FONT_PATHS_BOLD if bold else _FONT_PATHS_REGULAR
     
-    cjk_path = _get_cjk_font_path(bold)
+    cjk_path = _get_downloaded_font_path(target_lang, bold)
+    
     if bold:
-        cjk_candidates = [cjk_path, "C:/Windows/Fonts/msyhbd.ttc", "C:/Windows/Fonts/malgunbd.ttf", "C:/Windows/Fonts/meiryob.ttc"]
+        cjk_candidates = [] if not cjk_path else [cjk_path]
+        cjk_candidates += ["C:/Windows/Fonts/msyhbd.ttc", "C:/Windows/Fonts/malgunbd.ttf", "C:/Windows/Fonts/meiryob.ttc"]
     else:
-        cjk_candidates = [cjk_path, "C:/Windows/Fonts/msyh.ttc", "C:/Windows/Fonts/malgun.ttf", "C:/Windows/Fonts/meiryo.ttc"]
+        cjk_candidates = [] if not cjk_path else [cjk_path]
+        cjk_candidates += ["C:/Windows/Fonts/msyh.ttc", "C:/Windows/Fonts/malgun.ttf", "C:/Windows/Fonts/meiryo.ttc"]
         
     candidates = cjk_candidates + candidates
 
@@ -292,17 +318,17 @@ def _fits(
 
 def _best_font(
     draw: ImageDraw.ImageDraw, text: str, w: int, h: int, initial_size: int,
-    bold: bool = False,
+    bold: bool = False, target_lang: str = "en"
 ) -> Tuple[ImageFont.FreeTypeFont, List[str]]:
     seed = max(MIN_FONT, min(MAX_FONT, initial_size))
     lo, hi = MIN_FONT, min(MAX_FONT, max(seed * 2, MIN_FONT + 1))
 
-    best_font = _get_font(MIN_FONT, bold=bold)
+    best_font = _get_font(MIN_FONT, bold=bold, target_lang=target_lang)
     best_lines = _wrap_text(draw, text, w, best_font)
 
     while lo <= hi:
         mid = (lo + hi) // 2
-        font = _get_font(mid, bold=bold)
+        font = _get_font(mid, bold=bold, target_lang=target_lang)
         ok, lines = _fits(draw, text, w, h, font)
         if ok:
             best_font, best_lines = font, lines
@@ -536,7 +562,7 @@ def _erase_with_solid_fill(pil_img: Image.Image, block_info: list) -> Image.Imag
         draw.rectangle([(x, y), (x + w, y + h)], fill=info["bg"])
     return img
 
-def _draw_blocks(pil_img: Image.Image, blocks: list) -> Image.Image:
+def _draw_blocks(pil_img: Image.Image, blocks: list, target_lang: str = "en") -> Image.Image:
     img_w, img_h = pil_img.size
     block_info: List[dict] = []
     for item in blocks:
@@ -800,7 +826,7 @@ def _process_image_layer_page(doc: fitz.Document,
         print("      - all OCR blocks unchanged")
         return False
 
-    pil_img = _draw_blocks(pil_img, blocks)
+    pil_img = _draw_blocks(pil_img, blocks, target_lang)
     buf     = io.BytesIO()
     pil_img.save(buf, format="PNG")
     page.clean_contents()
@@ -848,7 +874,7 @@ def process_image(
         shutil.copy2(str(source_path), str(out_path))
         return new_name
 
-    pil_img  = _draw_blocks(pil_img, blocks)
+    pil_img  = _draw_blocks(pil_img, blocks, target_lang)
     ext      = source_path.suffix.lower()
     fmt_map  = {".jpg": "JPEG", ".jpeg": "JPEG", ".png": "PNG",
                 ".bmp": "BMP", ".gif": "GIF", ".tif": "TIFF", ".tiff": "TIFF"}
