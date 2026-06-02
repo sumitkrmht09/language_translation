@@ -58,7 +58,7 @@ def process_language(target_lang, job_id, xlf_path, graphics_src_dir, xlf_name_w
         if not success:
             return False, target_lang, None, None
             
-        zip_name = f"translated_{target_lang}_{xlf_name_without_ext}_{job_id}"
+        zip_name = f"translated_{target_lang}_{xlf_name_without_ext}"
         zip_out_path = OUTPUT_DIR / f"{zip_name}.zip"
         
         # Zipping output
