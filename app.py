@@ -119,16 +119,18 @@ if "downloads" not in st.session_state:
 st.markdown('<div class="glass-card">', unsafe_allow_html=True)
 st.markdown('<div class="card-header">Initiate Translation Task</div>', unsafe_allow_html=True)
 
-xlf_file = st.file_uploader(
-    "Upload XLIFF Source Document (.xlf, .xliff)", 
+xlf_files = st.file_uploader(
+    "Upload XLIFF Source Document(s) (.xlf, .xliff)", 
     type=["xlf", "xliff"],
-    help="Select the FrameMaker-exported XLIFF document."
+    accept_multiple_files=True,
+    help="Select one or more FrameMaker-exported XLIFF documents."
 )
 
-graphics_zip = st.file_uploader(
-    "Upload Source Graphics ZIP Archive (.zip)", 
+graphics_zips = st.file_uploader(
+    "Upload Source Graphics ZIP Archive(s) (.zip)", 
     type=["zip"],
-    help="Upload the ZIP file containing referenced graphics."
+    accept_multiple_files=True,
+    help="Upload one or more ZIP files containing referenced graphics."
 )
 
 target_langs = st.multiselect(
@@ -192,7 +194,7 @@ def process_language(target_lang, job_id, xlf_path, graphics_src_dir, xlf_name_w
         if not success:
             return False, target_lang, None, None
             
-        zip_name = f"translated_{target_lang}_{xlf_name_without_ext}"
+        zip_name = f"translated_{target_lang}_{xlf_name_without_ext}_{job_id}"
         zip_out_path = OUTPUT_DIR / f"{zip_name}.zip"
         
         # Zipping output
@@ -251,10 +253,10 @@ def process_language(target_lang, job_id, xlf_path, graphics_src_dir, xlf_name_w
 
 # Process logic
 if start_btn:
-    if not xlf_file:
-        st.error("Please upload an XLIFF file first.")
-    elif not graphics_zip:
-        st.error("Please upload the Graphics ZIP archive.")
+    if not xlf_files:
+        st.error("Please upload at least one XLIFF file.")
+    elif not graphics_zips:
+        st.error("Please upload at least one Graphics ZIP archive.")
     elif not target_langs:
         st.error("Please select at least one target language.")
     else:
@@ -266,52 +268,62 @@ if start_btn:
         session_dir.mkdir(parents=True, exist_ok=True)
         
         # Save uploads
-        xlf_path = session_dir / xlf_file.name
-        with open(xlf_path, "wb") as f:
-            f.write(xlf_file.getbuffer())
-            
-        zip_path = session_dir / graphics_zip.name
-        with open(zip_path, "wb") as f:
-            f.write(graphics_zip.getbuffer())
+        xlf_paths = []
+        for f in xlf_files:
+            p = session_dir / f.name
+            with open(p, "wb") as out:
+                out.write(f.getbuffer())
+            xlf_paths.append(p)
             
         # Extract graphics
         graphics_src_dir = session_dir / "graphics_src"
         graphics_src_dir.mkdir(parents=True, exist_ok=True)
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(graphics_src_dir)
-            
-        xlf_name_without_ext = xlf_file.name.replace('.xlf', '').replace('.xliff', '')
-        
+        for gz in graphics_zips:
+            zip_path = session_dir / gz.name
+            with open(zip_path, "wb") as out:
+                out.write(gz.getbuffer())
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(graphics_src_dir)
+                
         overall_success = True
         
-        with st.spinner("Processing selected languages in parallel. This may take a few minutes..."):
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(target_langs))) as executor:
+        tasks = []
+        for xlf_path in xlf_paths:
+            xlf_name_without_ext = xlf_path.name.replace('.xlf', '').replace('.xliff', '')
+            for target_lang in target_langs:
+                tasks.append((target_lang, job_id, xlf_path, graphics_src_dir, xlf_name_without_ext))
+                
+        with st.spinner(f"Processing {len(tasks)} translation tasks in parallel. This may take a few minutes..."):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(tasks))) as executor:
                 # Submit all tasks
-                future_to_lang = {
+                future_to_task = {
                     executor.submit(
                         process_language, 
-                        lang, 
-                        job_id, 
-                        xlf_path, 
-                        graphics_src_dir, 
-                        xlf_name_without_ext
-                    ): lang for lang in target_langs
+                        t[0], 
+                        t[1], 
+                        t[2], 
+                        t[3], 
+                        t[4]
+                    ): t for t in tasks
                 }
                 
                 # Gather results as they complete
-                for future in concurrent.futures.as_completed(future_to_lang):
-                    success, lang, z_path, z_data = future.result()
+                for future in concurrent.futures.as_completed(future_to_task):
+                    t = future_to_task[future]
+                    lang = t[0]
+                    xlf_name = t[4]
+                    success, returned_lang, z_path, z_data = future.result()
                     
                     if success:
                         st.session_state.downloads.append({
-                            "label": f"Download {LANGUAGES[lang]} ZIP",
+                            "label": f"Download {LANGUAGES[lang]} ZIP ({xlf_name})",
                             "data": z_data,
                             "file_name": Path(z_path).name,
                             "mime": "application/zip",
-                            "key": f"dl_{lang}_{job_id}"
+                            "key": f"dl_{lang}_{xlf_name}_{job_id}"
                         })
                     else:
-                        st.error(f"Execution failed for {LANGUAGES[lang]}.")
+                        st.error(f"Execution failed for {LANGUAGES[lang]} on {xlf_name}.")
                         overall_success = False
 
         shutil.rmtree(session_dir, ignore_errors=True)
