@@ -615,7 +615,7 @@ def _draw_blocks(pil_img: Image.Image, blocks: list, target_lang: str = "en") ->
             inner_h = max(1, h - 2 * BOX_PADDING)
             initial = max(MIN_FONT, int(h * 0.75))
             font, lines = _best_font(
-                draw, translated, inner_w, inner_h, initial, bold=is_bold,
+                draw, translated, inner_w, inner_h, initial, bold=is_bold, target_lang=target_lang
             )
             if not lines:
                 continue
