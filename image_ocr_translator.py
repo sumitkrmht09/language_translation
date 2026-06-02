@@ -347,7 +347,7 @@ def _ocr_translate(b64_image: str, target_lang: str,
         f"2. Translate the text into {lang_name}.\n"
         "3. Return the tight bounding box of each text block in pixels AND a\n"
         "   `bold` flag indicating whether the glyphs appear bold/heavy.\n"
-        "4. Add a `requires_translation` boolean flag. Set this to FALSE if the text is part of a company logo, a certification mark (e.g. NF, CE), a product warning symbol, or if it's just a brand name/model number that shouldn't be altered. Otherwise set to TRUE.\n\n"
+        "4. Add a `requires_translation` boolean flag. MUST BE FALSE if the image contains warning graphics, hazard symbols (e.g., Hand getting shocked, DANGER, HIGH VOLTAGE), safety labels, logos, or certification marks. If you see ANY such graphics in the image, set it to FALSE for ALL text in the image! Only translate pure instructional text without hazard symbols.\n\n"
         "OUTPUT - return ONLY a valid JSON array, no markdown fences:\n"
         '[{"original":"...","translated":"...","x":0,"y":0,"width":0,"height":0,"bold":false,"requires_translation":true}]\n\n'
         "RULES\n"
@@ -520,12 +520,11 @@ def _erase_text_regions(pil_img: Image.Image, block_info: list) -> Image.Image:
     return _erase_with_solid_fill(pil_img, block_info)
 
 def _erase_with_inpaint(pil_img: Image.Image, block_info: list) -> Image.Image:
-    import cv2
-    import numpy as np
     arr = np.array(pil_img.convert("RGB"))
     bgr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
     img_h, img_w = bgr.shape[:2]
 
+    mask = np.zeros((img_h, img_w), dtype=np.uint8)
     text_threshold = 35    
 
     for info in block_info:
@@ -542,26 +541,16 @@ def _erase_with_inpaint(pil_img: Image.Image, block_info: list) -> Image.Image:
 
         diff = box - bg_arr
         dist = np.linalg.norm(diff, axis=2)
-        text_mask = (dist > text_threshold).astype(np.uint8)
-        
-        # Filter out massive components (like overlapping logos/icons) from the text mask
-        # Max area of a single glyph is roughly box_height * box_height
-        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(text_mask, connectivity=8)
-        max_glyph_area = h * h * 1.5
-        for i in range(1, num_labels):
-            if stats[i, cv2.CC_STAT_AREA] > max_glyph_area:
-                text_mask[labels == i] = 0
+        text_mask = (dist > text_threshold).astype(np.uint8) * 255
 
-        text_mask = text_mask * 255
         kernel = np.ones((3, 3), np.uint8)
         text_mask = cv2.dilate(text_mask, kernel, iterations=1)
 
-        # Smart color replacement instead of cv2.inpaint for crisp edges
-        bg_bgr = np.array([info["bg"][2], info["bg"][1], info["bg"][0]], dtype=np.uint8)
-        box_bgr = bgr[y0:y1, x0:x1]
-        box_bgr[text_mask > 0] = bg_bgr
+        existing = mask[y0:y1, x0:x1]
+        mask[y0:y1, x0:x1] = np.maximum(existing, text_mask)
 
-    cleaned_rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    cleaned_bgr = cv2.inpaint(bgr, mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
+    cleaned_rgb = cv2.cvtColor(cleaned_bgr, cv2.COLOR_BGR2RGB)
     return Image.fromarray(cleaned_rgb)
 
 def _erase_with_solid_fill(pil_img: Image.Image, block_info: list) -> Image.Image:
