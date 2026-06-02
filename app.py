@@ -4,6 +4,7 @@ import uuid
 import zipfile
 import argparse
 import time
+import concurrent.futures
 from pathlib import Path
 import streamlit as st
 from dotenv import load_dotenv
@@ -138,6 +139,14 @@ target_langs = st.multiselect(
     options=list(LANGUAGES.keys()),
     format_func=lambda x: f"{LANGUAGES[x]} ({x})",
     help="Choose multiple languages to translate them all."
+)
+
+max_workers_slider = st.slider(
+    "Parallel Processing Threads",
+    min_value=1,
+    max_value=10,
+    value=2,
+    help="Increase this to translate faster. If you encounter 502 Connection Errors, reduce it to 1."
 )
 
 st.markdown('<br>', unsafe_allow_html=True)
@@ -297,47 +306,53 @@ if start_btn:
             for target_lang in target_langs:
                 tasks.append((target_lang, job_id, xlf_path, graphics_src_dir, xlf_name_without_ext))
                 
-        with st.spinner(f"Processing {len(tasks)} translation tasks sequentially. This will take a while..."):
+        with st.spinner(f"Processing {len(tasks)} translation tasks..."):
             progress_bar = st.progress(0)
             status_text = st.empty()
             start_time = time.time()
+            completed_tasks = 0
             
-            for idx, t in enumerate(tasks):
-                lang = t[0]
-                xlf_name = t[4]
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(max_workers_slider, len(tasks))) as executor:
+                future_to_task = {
+                    executor.submit(
+                        process_language, 
+                        t[0], 
+                        t[1], 
+                        t[2], 
+                        t[3], 
+                        t[4]
+                    ): t for t in tasks
+                }
                 
-                elapsed = time.time() - start_time
-                if idx > 0:
-                    avg_time = elapsed / idx
-                    remaining = avg_time * (len(tasks) - idx)
+                for future in concurrent.futures.as_completed(future_to_task):
+                    t = future_to_task[future]
+                    lang = t[0]
+                    xlf_name = t[4]
+                    
+                    completed_tasks += 1
+                    elapsed = time.time() - start_time
+                    avg_time = elapsed / completed_tasks
+                    remaining = avg_time * (len(tasks) - completed_tasks)
                     mins, secs = divmod(int(remaining), 60)
                     time_str = f"Estimated time left: {mins}m {secs}s"
-                else:
-                    time_str = "Calculating estimated time..."
                     
-                status_text.info(f"**Task {idx+1} of {len(tasks)}** | Language: {LANGUAGES[lang]} | File: {xlf_name} | {time_str}")
-                
-                success, returned_lang, z_path, _ = process_language(
-                    t[0], 
-                    t[1], 
-                    t[2], 
-                    t[3], 
-                    t[4]
-                )
-                
-                if success:
-                    st.session_state.downloads.append({
-                        "label": f"Download {LANGUAGES[lang]} ZIP ({xlf_name})",
-                        "path": str(z_path),
-                        "file_name": Path(z_path).name,
-                        "mime": "application/zip",
-                        "key": f"dl_{lang}_{xlf_name}_{job_id}"
-                    })
-                else:
-                    st.error(f"Execution failed for {LANGUAGES[lang]} on {xlf_name}.")
-                    overall_success = False
+                    status_text.info(f"**Completed {completed_tasks} of {len(tasks)}** | Just finished: {LANGUAGES[lang]} for *{xlf_name}* | {time_str}")
                     
-                progress_bar.progress((idx + 1) / len(tasks))
+                    success, returned_lang, z_path, _ = future.result()
+                    
+                    if success:
+                        st.session_state.downloads.append({
+                            "label": f"Download {LANGUAGES[lang]} ZIP ({xlf_name})",
+                            "path": str(z_path),
+                            "file_name": Path(z_path).name,
+                            "mime": "application/zip",
+                            "key": f"dl_{lang}_{xlf_name}_{job_id}"
+                        })
+                    else:
+                        st.error(f"Execution failed for {LANGUAGES[lang]} on {xlf_name}.")
+                        overall_success = False
+                        
+                    progress_bar.progress(completed_tasks / len(tasks))
                 
             status_text.empty()
             progress_bar.empty()
