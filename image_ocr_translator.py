@@ -520,11 +520,12 @@ def _erase_text_regions(pil_img: Image.Image, block_info: list) -> Image.Image:
     return _erase_with_solid_fill(pil_img, block_info)
 
 def _erase_with_inpaint(pil_img: Image.Image, block_info: list) -> Image.Image:
+    import cv2
+    import numpy as np
     arr = np.array(pil_img.convert("RGB"))
     bgr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
     img_h, img_w = bgr.shape[:2]
 
-    mask = np.zeros((img_h, img_w), dtype=np.uint8)
     text_threshold = 35    
 
     for info in block_info:
@@ -541,16 +542,26 @@ def _erase_with_inpaint(pil_img: Image.Image, block_info: list) -> Image.Image:
 
         diff = box - bg_arr
         dist = np.linalg.norm(diff, axis=2)
-        text_mask = (dist > text_threshold).astype(np.uint8) * 255
+        text_mask = (dist > text_threshold).astype(np.uint8)
+        
+        # Filter out massive components (like overlapping logos/icons) from the text mask
+        # Max area of a single glyph is roughly box_height * box_height
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(text_mask, connectivity=8)
+        max_glyph_area = h * h * 1.5
+        for i in range(1, num_labels):
+            if stats[i, cv2.CC_STAT_AREA] > max_glyph_area:
+                text_mask[labels == i] = 0
 
+        text_mask = text_mask * 255
         kernel = np.ones((3, 3), np.uint8)
         text_mask = cv2.dilate(text_mask, kernel, iterations=1)
 
-        existing = mask[y0:y1, x0:x1]
-        mask[y0:y1, x0:x1] = np.maximum(existing, text_mask)
+        # Smart color replacement instead of cv2.inpaint for crisp edges
+        bg_bgr = np.array([info["bg"][2], info["bg"][1], info["bg"][0]], dtype=np.uint8)
+        box_bgr = bgr[y0:y1, x0:x1]
+        box_bgr[text_mask > 0] = bg_bgr
 
-    cleaned_bgr = cv2.inpaint(bgr, mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
-    cleaned_rgb = cv2.cvtColor(cleaned_bgr, cv2.COLOR_BGR2RGB)
+    cleaned_rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
     return Image.fromarray(cleaned_rgb)
 
 def _erase_with_solid_fill(pil_img: Image.Image, block_info: list) -> Image.Image:
