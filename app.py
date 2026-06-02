@@ -152,15 +152,22 @@ def render_downloads():
         with download_area.container():
             st.markdown('<div class="glass-card">', unsafe_allow_html=True)
             st.markdown('<div class="card-header">Available Downloads</div>', unsafe_allow_html=True)
-            for dl in st.session_state.downloads:
-                st.download_button(
-                    label=dl["label"],
-                    data=dl["data"],
-                    file_name=dl["file_name"],
-                    mime=dl["mime"],
-                    use_container_width=True,
-                    key=dl["key"]
-                )
+            
+            options = [dl["label"] for dl in st.session_state.downloads]
+            selected_label = st.selectbox("Select a translated package to download:", options=options)
+            
+            selected_dl = next((dl for dl in st.session_state.downloads if dl["label"] == selected_label), None)
+            
+            if selected_dl and os.path.exists(selected_dl["path"]):
+                with open(selected_dl["path"], "rb") as f:
+                    st.download_button(
+                        label=selected_dl["label"],
+                        data=f,
+                        file_name=selected_dl["file_name"],
+                        mime=selected_dl["mime"],
+                        use_container_width=True,
+                        key="active_download_btn"
+                    )
             st.markdown('</div>', unsafe_allow_html=True)
                 
 render_downloads()
@@ -240,11 +247,8 @@ def process_language(target_lang, job_id, xlf_path, graphics_src_dir, xlf_name_w
         except Exception:
             pass # Ignore mirroring errors if Downloads folder is tricky
             
-        # Serve file download
-        with open(zip_out_path, "rb") as f:
-            zip_data = f.read()
-            
-        return True, target_lang, zip_out_path, zip_data
+        # Do not load file into RAM to prevent server OOM
+        return True, target_lang, zip_out_path, None
 
     except Exception:
         if 'output_root' in locals():
@@ -313,7 +317,7 @@ if start_btn:
                     
                 status_text.info(f"**Task {idx+1} of {len(tasks)}** | Language: {LANGUAGES[lang]} | File: {xlf_name} | {time_str}")
                 
-                success, returned_lang, z_path, z_data = process_language(
+                success, returned_lang, z_path, _ = process_language(
                     t[0], 
                     t[1], 
                     t[2], 
@@ -324,7 +328,7 @@ if start_btn:
                 if success:
                     st.session_state.downloads.append({
                         "label": f"Download {LANGUAGES[lang]} ZIP ({xlf_name})",
-                        "data": z_data,
+                        "path": str(z_path),
                         "file_name": Path(z_path).name,
                         "mime": "application/zip",
                         "key": f"dl_{lang}_{xlf_name}_{job_id}"
