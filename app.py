@@ -5,7 +5,6 @@ import zipfile
 import argparse
 from pathlib import Path
 import streamlit as st
-import concurrent.futures
 from dotenv import load_dotenv
 
 # Load env variables
@@ -137,15 +136,7 @@ target_langs = st.multiselect(
     "Select Target Languages",
     options=list(LANGUAGES.keys()),
     format_func=lambda x: f"{LANGUAGES[x]} ({x})",
-    help="Choose multiple languages to translate them all in parallel!"
-)
-
-max_workers_slider = st.slider(
-    "Parallel Processing Threads",
-    min_value=1,
-    max_value=10,
-    value=2,
-    help="Reduce this if you encounter 502 Connection Errors. Increase it to translate faster if your server has enough memory."
+    help="Choose multiple languages to translate them all."
 )
 
 st.markdown('<br>', unsafe_allow_html=True)
@@ -301,38 +292,30 @@ if start_btn:
             for target_lang in target_langs:
                 tasks.append((target_lang, job_id, xlf_path, graphics_src_dir, xlf_name_without_ext))
                 
-        with st.spinner(f"Processing {len(tasks)} translation tasks in parallel. This may take a few minutes..."):
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(max_workers_slider, len(tasks))) as executor:
-                # Submit all tasks
-                future_to_task = {
-                    executor.submit(
-                        process_language, 
-                        t[0], 
-                        t[1], 
-                        t[2], 
-                        t[3], 
-                        t[4]
-                    ): t for t in tasks
-                }
+        with st.spinner(f"Processing {len(tasks)} translation tasks sequentially. This will take a while..."):
+            for t in tasks:
+                lang = t[0]
+                xlf_name = t[4]
                 
-                # Gather results as they complete
-                for future in concurrent.futures.as_completed(future_to_task):
-                    t = future_to_task[future]
-                    lang = t[0]
-                    xlf_name = t[4]
-                    success, returned_lang, z_path, z_data = future.result()
-                    
-                    if success:
-                        st.session_state.downloads.append({
-                            "label": f"Download {LANGUAGES[lang]} ZIP ({xlf_name})",
-                            "data": z_data,
-                            "file_name": Path(z_path).name,
-                            "mime": "application/zip",
-                            "key": f"dl_{lang}_{xlf_name}_{job_id}"
-                        })
-                    else:
-                        st.error(f"Execution failed for {LANGUAGES[lang]} on {xlf_name}.")
-                        overall_success = False
+                success, returned_lang, z_path, z_data = process_language(
+                    t[0], 
+                    t[1], 
+                    t[2], 
+                    t[3], 
+                    t[4]
+                )
+                
+                if success:
+                    st.session_state.downloads.append({
+                        "label": f"Download {LANGUAGES[lang]} ZIP ({xlf_name})",
+                        "data": z_data,
+                        "file_name": Path(z_path).name,
+                        "mime": "application/zip",
+                        "key": f"dl_{lang}_{xlf_name}_{job_id}"
+                    })
+                else:
+                    st.error(f"Execution failed for {LANGUAGES[lang]} on {xlf_name}.")
+                    overall_success = False
 
         shutil.rmtree(session_dir, ignore_errors=True)
         shutil.rmtree(OUTPUT_DIR / job_id, ignore_errors=True)
