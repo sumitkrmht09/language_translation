@@ -804,10 +804,7 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
             # Draw text using Left-Baseline anchor so we know exactly where the baseline is
             anchor_x = padding_x - left
             anchor_y = padding_y - top
-            # Add a white stroke (halo) to the text so that if it crosses a table border, 
-            # the text is clearly readable and the border doesn't slice through the black ink.
-            sw = max(1, int(1.5 * zoom))
-            draw.text((anchor_x, anchor_y), translated, font=font, fill=(0, 0, 0, 255), anchor="ls", stroke_width=sw, stroke_fill=(255, 255, 255, 255))
+            draw.text((anchor_x, anchor_y), translated, font=font, fill=(0, 0, 0, 255), anchor="ls")
             
             # get image bytes
             import io
