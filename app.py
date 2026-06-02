@@ -140,6 +140,14 @@ target_langs = st.multiselect(
     help="Choose multiple languages to translate them all in parallel!"
 )
 
+max_workers_slider = st.slider(
+    "Parallel Processing Threads",
+    min_value=1,
+    max_value=10,
+    value=2,
+    help="Reduce this if you encounter 502 Connection Errors. Increase it to translate faster if your server has enough memory."
+)
+
 st.markdown('<br>', unsafe_allow_html=True)
 start_btn = st.button("Translate & Process Graphics", use_container_width=True, type="primary")
 st.markdown('</div>', unsafe_allow_html=True)
@@ -294,7 +302,7 @@ if start_btn:
                 tasks.append((target_lang, job_id, xlf_path, graphics_src_dir, xlf_name_without_ext))
                 
         with st.spinner(f"Processing {len(tasks)} translation tasks in parallel. This may take a few minutes..."):
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(tasks))) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(max_workers_slider, len(tasks))) as executor:
                 # Submit all tasks
                 future_to_task = {
                     executor.submit(
