@@ -241,6 +241,23 @@ def main():
             with download_area.container():
                 st.markdown('<div class="glass-card">', unsafe_allow_html=True)
                 st.markdown('<div class="card-header">Available Downloads</div>', unsafe_allow_html=True)
+                
+                # Render Master Download Button if available
+                if "master_download" in st.session_state and st.session_state.master_download:
+                    mdl = st.session_state.master_download
+                    if os.path.exists(mdl["path"]):
+                        with open(mdl["path"], "rb") as f:
+                            st.download_button(
+                                label=mdl["label"],
+                                data=f,
+                                file_name=mdl["file_name"],
+                                mime=mdl["mime"],
+                                use_container_width=True,
+                                key=mdl["key"],
+                                type="primary"
+                            )
+                        st.markdown("<hr style='border-color: rgba(255,255,255,0.1); margin: 1rem 0;'>", unsafe_allow_html=True)
+
                 for dl in st.session_state.downloads:
                     if os.path.exists(dl["path"]):
                         with open(dl["path"], "rb") as f:
@@ -266,6 +283,7 @@ def main():
             st.error("Please select at least one target language.")
         else:
             st.session_state.downloads = []
+            st.session_state.master_download = None
             render_downloads()
             
             job_id = uuid.uuid4().hex[:8]
@@ -351,6 +369,23 @@ def main():
 
             shutil.rmtree(session_dir, ignore_errors=True)
             shutil.rmtree(OUTPUT_DIR / job_id, ignore_errors=True)
+            
+            # Create master ZIP if multiple files were generated
+            if len(st.session_state.downloads) > 1:
+                master_zip_name = f"All_Translations_{job_id}.zip"
+                master_zip_path = OUTPUT_DIR / master_zip_name
+                with zipfile.ZipFile(master_zip_path, "w", zipfile.ZIP_STORED) as master_zip:
+                    for dl in st.session_state.downloads:
+                        if os.path.exists(dl["path"]):
+                            master_zip.write(dl["path"], arcname=dl["file_name"])
+                
+                st.session_state.master_download = {
+                    "label": "📦 Download ALL Files (Master ZIP)",
+                    "path": str(master_zip_path),
+                    "file_name": master_zip_name,
+                    "mime": "application/zip",
+                    "key": f"dl_master_{job_id}"
+                }
             
             if overall_success:
                 st.success("All translations and OCR completed successfully!")
