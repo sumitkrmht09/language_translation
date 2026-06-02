@@ -5,6 +5,7 @@ import zipfile
 import argparse
 from pathlib import Path
 import streamlit as st
+import concurrent.futures
 from dotenv import load_dotenv
 
 # Load env variables
@@ -23,8 +24,8 @@ from translate_xliff_openai_2 import translate_file as run_translation, MODEL as
 # Page config
 st.set_page_config(
     page_title="FrameMaker Translation Studio",
-    page_icon="📝",
-    layout="wide"
+    page_icon="??",
+    layout="centered"
 )
 
 # Premium layout customization using HTML & CSS
@@ -84,6 +85,13 @@ st.markdown("""
             padding-bottom: 0.5rem;
             margin-bottom: 1.25rem;
         }
+        
+        /* Styler for multiselect */
+        div[data-baseweb="select"] > div {
+            background-color: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: white;
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -104,80 +112,142 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# Grid Layout
-col_setup, col_monitor = st.columns([5, 4], gap="large")
 
-with col_setup:
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    st.markdown('<div class="card-header">1. Initiate Translation Task</div>', unsafe_allow_html=True)
+if "downloads" not in st.session_state:
+    st.session_state.downloads = []
+
+st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+st.markdown('<div class="card-header">Initiate Translation Task</div>', unsafe_allow_html=True)
+
+xlf_file = st.file_uploader(
+    "Upload XLIFF Source Document (.xlf, .xliff)", 
+    type=["xlf", "xliff"],
+    help="Select the FrameMaker-exported XLIFF document."
+)
+
+graphics_zip = st.file_uploader(
+    "Upload Source Graphics ZIP Archive (.zip)", 
+    type=["zip"],
+    help="Upload the ZIP file containing referenced graphics."
+)
+
+target_langs = st.multiselect(
+    "?? Select Target Languages",
+    options=list(LANGUAGES.keys()),
+    format_func=lambda x: f"{LANGUAGES[x]} ({x})",
+    help="Choose multiple languages to translate them all in parallel!"
+)
+
+st.markdown('<br>', unsafe_allow_html=True)
+start_btn = st.button("?? Translate & Process Graphics", use_container_width=True, type="primary")
+st.markdown('</div>', unsafe_allow_html=True)
+
+# Download Button Area
+download_area = st.empty()
+
+def render_downloads():
+    if st.session_state.downloads:
+        with download_area.container():
+            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+            st.markdown('<div class="card-header">Available Downloads</div>', unsafe_allow_html=True)
+            for dl in st.session_state.downloads:
+                st.download_button(
+                    label=dl["label"],
+                    data=dl["data"],
+                    file_name=dl["file_name"],
+                    mime=dl["mime"],
+                    use_container_width=True,
+                    key=dl["key"]
+                )
+            st.markdown('</div>', unsafe_allow_html=True)
+                
+render_downloads()
+
+def process_language(target_lang, job_id, xlf_path, graphics_src_dir, xlf_name_without_ext):
+    output_root = OUTPUT_DIR / job_id / f"translated_{target_lang}_{xlf_name_without_ext}"
+    output_root.mkdir(parents=True, exist_ok=True)
     
-    xlf_file = st.file_uploader(
-        "Upload XLIFF Source Document (.xlf, .xliff)", 
-        type=["xlf", "xliff"],
-        help="Select the FrameMaker-exported XLIFF document."
+    translation_args = argparse.Namespace(
+        resume=False,
+        batch_size=40,
+        dry_run=False,
+        graphics_source_folder=str(graphics_src_dir)
     )
     
-    graphics_zip = st.file_uploader(
-        "Upload Source Graphics ZIP Archive (.zip)", 
-        type=["zip"],
-        help="Upload the ZIP file containing referenced graphics."
-    )
-    
-    target_langs = st.multiselect(
-        "Select Target Languages",
-        options=list(LANGUAGES.keys()),
-        format_func=lambda x: f"{LANGUAGES[x]} ({x})"
-    )
-    
+    def noop_progress(msg: str, current: int, total: int, stats: dict = None):
+        # We drop UI updates since they break in Streamlit threads, 
+        # and instead rely on the main spinner for UX.
+        pass
 
-    
-    st.markdown('<br>', unsafe_allow_html=True)
-    start_btn = st.button("Translate & Process Graphics", use_container_width=True, type="primary")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-with col_monitor:
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    st.markdown('<div class="card-header">2. Execution Monitor</div>', unsafe_allow_html=True)
-    
-    # Progress and status elements
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    status_text.text("Waiting to start task...")
-    
-    # Statistics metrics
-    st.markdown("### Metrics")
-    m_col1, m_col2 = st.columns(2)
-    with m_col1:
-        seg_metric = st.metric("Segments Translated", "0 / 0")
-    with m_col2:
-        img_metric = st.metric("Graphics Replaced", "0 / 0")
+    try:
+        success = run_translation(
+            input_path=xlf_path,
+            output_root=output_root,
+            target_lang=target_lang,
+            args=translation_args,
+            model_to_use=DEFAULT_MODEL,
+            progress_callback=noop_progress
+        )
         
-    st.markdown("### Console Log")
-    log_area = st.empty()
-    log_area.text_area("Logs Console", value="Initialize a task to view execution logs.", height=150, disabled=True)
-    
-    if "downloads" not in st.session_state:
-        st.session_state.downloads = []
+        if not success:
+            return False, target_lang, None, None
+            
+        zip_name = f"translated_{target_lang}_{xlf_name_without_ext}"
+        zip_out_path = OUTPUT_DIR / f"{zip_name}.zip"
+        
+        # Zipping output
+        with zipfile.ZipFile(zip_out_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for path in sorted(output_root.rglob("*")):
+                if not path.is_file():
+                    continue
+                rel = path.relative_to(output_root)
+                arcname = f"{output_root.name}/{rel.as_posix()}"
+                zf.write(path, arcname=arcname)
+                
+        # Unzip folder server-side for delivery
+        unzip_dest = OUTPUT_DIR / zip_name
+        if unzip_dest.exists():
+            shutil.rmtree(unzip_dest, ignore_errors=True)
+        with zipfile.ZipFile(zip_out_path, 'r') as zip_ref:
+            zip_ref.extractall(OUTPUT_DIR)
+            
+        srv_double_nested = unzip_dest / zip_name
+        srv_double_nested.mkdir(parents=True, exist_ok=True)
+        if (unzip_dest / "graphics").exists():
+            shutil.copytree(unzip_dest / "graphics", srv_double_nested / "graphics", dirs_exist_ok=True)
+        if (unzip_dest / "text_conversion_file").exists():
+            shutil.copytree(unzip_dest / "text_conversion_file", srv_double_nested / "text_conversion_file", dirs_exist_ok=True)
 
-    # Download Button Area
-    download_area = st.empty()
-    
-    def render_downloads():
-        if st.session_state.downloads:
-            with download_area.container():
-                st.markdown("### Available Downloads")
-                for dl in st.session_state.downloads:
-                    st.download_button(
-                        label=dl["label"],
-                        data=dl["data"],
-                        file_name=dl["file_name"],
-                        mime=dl["mime"],
-                        use_container_width=True,
-                        key=dl["key"]
-                    )
+        # Mirror copy to local Downloads directory
+        try:
+            downloads_dir = get_downloads_dir()
+            if downloads_dir.exists():
+                shutil.copy2(zip_out_path, downloads_dir / f"{zip_name}.zip")
+                dl_unzip_dest = downloads_dir / zip_name
+                if dl_unzip_dest.exists():
+                    shutil.rmtree(dl_unzip_dest, ignore_errors=True)
+                with zipfile.ZipFile(zip_out_path, 'r') as zip_ref:
+                    zip_ref.extractall(downloads_dir)
                     
-    render_downloads()
-    st.markdown('</div>', unsafe_allow_html=True)
+                double_nested_dir = dl_unzip_dest / zip_name
+                double_nested_dir.mkdir(parents=True, exist_ok=True)
+                if (dl_unzip_dest / "graphics").exists():
+                    shutil.copytree(dl_unzip_dest / "graphics", double_nested_dir / "graphics", dirs_exist_ok=True)
+                if (dl_unzip_dest / "text_conversion_file").exists():
+                    shutil.copytree(dl_unzip_dest / "text_conversion_file", double_nested_dir / "text_conversion_file", dirs_exist_ok=True)
+        except Exception:
+            pass # Ignore mirroring errors if Downloads folder is tricky
+            
+        # Serve file download
+        with open(zip_out_path, "rb") as f:
+            zip_data = f.read()
+            
+        return True, target_lang, zip_out_path, zip_data
+
+    except Exception:
+        if 'output_root' in locals():
+            shutil.rmtree(output_root, ignore_errors=True)
+        return False, target_lang, None, None
 
 # Process logic
 if start_btn:
@@ -188,11 +258,8 @@ if start_btn:
     elif not target_langs:
         st.error("Please select at least one target language.")
     else:
-        # Initializing job
         st.session_state.downloads = []
         render_downloads()
-        status_text.info("Saving uploads and extracting source assets...")
-        progress_bar.progress(5)
         
         job_id = uuid.uuid4().hex[:8]
         session_dir = UPLOAD_DIR / job_id
@@ -215,154 +282,45 @@ if start_btn:
             
         xlf_name_without_ext = xlf_file.name.replace('.xlf', '').replace('.xliff', '')
         
-        # Console Log Stream
-        console_logs = [f"[{job_id}] Task initialized successfully."]
-        log_area.text_area("Logs Console", value="\n".join(console_logs), height=150, disabled=True)
-
-        # Start Processing
-        translation_args = argparse.Namespace(
-            resume=False,
-            batch_size=40,
-            dry_run=False,
-            graphics_source_folder=str(graphics_src_dir)
-        )
-        
         overall_success = True
         
-        for target_lang in target_langs:
-            output_root = OUTPUT_DIR / job_id / f"translated_{target_lang}_{xlf_name_without_ext}"
-            output_root.mkdir(parents=True, exist_ok=True)
-            
-            console_logs.append(f"[{job_id}] Starting translation for language: {target_lang}")
-            log_area.text_area("Logs Console", value="\n".join(console_logs[-8:]), height=150, disabled=True)
-            status_text.info(f"Processing language: {LANGUAGES[target_lang]} ({target_lang})")
-            
-            # Progress updates callback
-            def progress_cb(msg: str, current: int, total: int, stats: dict = None):
-                console_logs.append(f"[{job_id}] [{target_lang}] {msg}")
-                # Keep logs container scrolling
-                log_area.text_area("Logs Console", value="\n".join(console_logs[-8:]), height=150, disabled=True)
-                status_text.info(f"[{target_lang}] {msg}")
+        with st.spinner("Processing selected languages in parallel. This may take a few minutes..."):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(target_langs))) as executor:
+                # Submit all tasks
+                future_to_lang = {
+                    executor.submit(
+                        process_language, 
+                        lang, 
+                        job_id, 
+                        xlf_path, 
+                        graphics_src_dir, 
+                        xlf_name_without_ext
+                    ): lang for lang in target_langs
+                }
                 
-                # Update metrics
-                if stats:
-                    seg_total = stats.get("total_segments", 0)
-                    seg_done = stats.get("translated_segments", 0)
-                    img_total = stats.get("total_graphics", 0)
-                    img_done = stats.get("converted_graphics", 0)
+                # Gather results as they complete
+                for future in concurrent.futures.as_completed(future_to_lang):
+                    success, lang, z_path, z_data = future.result()
                     
-                    if seg_total > 0:
-                        seg_metric.metric(f"Segments ({target_lang})", f"{seg_done} / {seg_total}")
-                    if img_total > 0:
-                        img_metric.metric(f"Graphics ({target_lang})", f"{img_done} / {img_total}")
-                        
-                # Update progress bar
-                if "Translating segments" in msg:
-                    pct = 15 + int((current / max(1, total)) * 45)
-                elif "Processed graphic" in msg or "Processing graphics" in msg:
-                    pct = 65 + int((current / max(1, total)) * 25)
-                elif "Writing translation" in msg:
-                    pct = 62
-                else:
-                    pct = 10
-                progress_bar.progress(min(92, pct))
-
-            try:
-                success = run_translation(
-                    input_path=xlf_path,
-                    output_root=output_root,
-                    target_lang=target_lang,
-                    args=translation_args,
-                    model_to_use=DEFAULT_MODEL,
-                    progress_callback=progress_cb
-                )
-                
-                if not success:
-                    st.error(f"Translation logic failed for {target_lang}. Check console logs.")
-                    status_text.error(f"Failed for {target_lang}.")
-                    overall_success = False
-                else:
-                    progress_bar.progress(93)
-                    status_text.info(f"Packaging translated assets into ZIP deliverable for {target_lang}...")
-                    
-                    zip_name = f"translated_{target_lang}_{xlf_name_without_ext}"
-                    zip_out_path = OUTPUT_DIR / f"{zip_name}.zip"
-                    
-                    # Zipping output
-                    with zipfile.ZipFile(zip_out_path, "w", zipfile.ZIP_DEFLATED) as zf:
-                        for path in sorted(output_root.rglob("*")):
-                            if not path.is_file():
-                                continue
-                            rel = path.relative_to(output_root)
-                            arcname = f"{output_root.name}/{rel.as_posix()}"
-                            zf.write(path, arcname=arcname)
-                            
-                    # Unzip folder server-side
-                    unzip_dest = OUTPUT_DIR / zip_name
-                    if unzip_dest.exists():
-                        shutil.rmtree(unzip_dest, ignore_errors=True)
-                    with zipfile.ZipFile(zip_out_path, 'r') as zip_ref:
-                        zip_ref.extractall(OUTPUT_DIR)
-                        
-                    srv_double_nested = unzip_dest / zip_name
-                    srv_double_nested.mkdir(parents=True, exist_ok=True)
-                    if (unzip_dest / "graphics").exists():
-                        shutil.copytree(unzip_dest / "graphics", srv_double_nested / "graphics", dirs_exist_ok=True)
-                    if (unzip_dest / "text_conversion_file").exists():
-                        shutil.copytree(unzip_dest / "text_conversion_file", srv_double_nested / "text_conversion_file", dirs_exist_ok=True)
-
-                    # Mirror copy to local Downloads directory
-                    downloads_mirrored = False
-                    try:
-                        downloads_dir = get_downloads_dir()
-                        if downloads_dir.exists():
-                            shutil.copy2(zip_out_path, downloads_dir / f"{zip_name}.zip")
-                            dl_unzip_dest = downloads_dir / zip_name
-                            if dl_unzip_dest.exists():
-                                shutil.rmtree(dl_unzip_dest, ignore_errors=True)
-                            with zipfile.ZipFile(zip_out_path, 'r') as zip_ref:
-                                zip_ref.extractall(downloads_dir)
-                                
-                            double_nested_dir = dl_unzip_dest / zip_name
-                            double_nested_dir.mkdir(parents=True, exist_ok=True)
-                            if (dl_unzip_dest / "graphics").exists():
-                                shutil.copytree(dl_unzip_dest / "graphics", double_nested_dir / "graphics", dirs_exist_ok=True)
-                            if (dl_unzip_dest / "text_conversion_file").exists():
-                                shutil.copytree(dl_unzip_dest / "text_conversion_file", double_nested_dir / "text_conversion_file", dirs_exist_ok=True)
-                            downloads_mirrored = True
-                            console_logs.append(f"[{job_id}] Successfully extracted double-nested folder structure to local Downloads folder for {target_lang}.")
-                    except Exception as e:
-                        console_logs.append(f"[{job_id}] Mirroring download warning for {target_lang}: {e}")
-                        
-                    # Serve file download
-                    with open(zip_out_path, "rb") as f:
-                        zip_data = f.read()
-                    
-                    st.session_state.downloads.append({
-                        "label": f"Download {LANGUAGES[target_lang]} ZIP",
-                        "data": zip_data,
-                        "file_name": f"{zip_name}.zip",
-                        "mime": "application/zip",
-                        "key": f"dl_{target_lang}_{job_id}"
-                    })
-                    
-            except Exception as e:
-                st.error(f"Execution Error for {target_lang}: {e}")
-                status_text.error(f"Execution failed for {target_lang}.")
-                overall_success = False
-                if 'output_root' in locals():
-                    shutil.rmtree(output_root, ignore_errors=True)
+                    if success:
+                        st.session_state.downloads.append({
+                            "label": f"Download {LANGUAGES[lang]} ZIP",
+                            "data": z_data,
+                            "file_name": Path(z_path).name,
+                            "mime": "application/zip",
+                            "key": f"dl_{lang}_{job_id}"
+                        })
+                    else:
+                        st.error(f"Execution failed for {LANGUAGES[lang]}.")
+                        overall_success = False
 
         shutil.rmtree(session_dir, ignore_errors=True)
         shutil.rmtree(OUTPUT_DIR / job_id, ignore_errors=True)
         
         if overall_success:
-            progress_bar.progress(100)
-            status_text.success("All translations and OCR completed successfully!")
-            console_logs.append(f"[{job_id}] Process Completed successfully.")
-            log_area.text_area("Logs Console", value="\n".join(console_logs[-8:]), height=150, disabled=True)
+            st.success("All translations and OCR completed successfully!")
             st.balloons()
         else:
-            status_text.warning("Completed with some errors. Check console logs.")
+            st.warning("Completed with some errors.")
             
         render_downloads()
