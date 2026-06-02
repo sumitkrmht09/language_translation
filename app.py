@@ -156,8 +156,27 @@ with col_monitor:
     log_area = st.empty()
     log_area.text_area("Logs Console", value="Initialize a task to view execution logs.", height=150, disabled=True)
     
+    if "downloads" not in st.session_state:
+        st.session_state.downloads = []
+
     # Download Button Area
-    download_area = st.container()
+    download_area = st.empty()
+    
+    def render_downloads():
+        if st.session_state.downloads:
+            with download_area.container():
+                st.markdown("### Available Downloads")
+                for dl in st.session_state.downloads:
+                    st.download_button(
+                        label=dl["label"],
+                        data=dl["data"],
+                        file_name=dl["file_name"],
+                        mime=dl["mime"],
+                        use_container_width=True,
+                        key=dl["key"]
+                    )
+                    
+    render_downloads()
     st.markdown('</div>', unsafe_allow_html=True)
 
 # Process logic
@@ -170,6 +189,8 @@ if start_btn:
         st.error("Please select at least one target language.")
     else:
         # Initializing job
+        st.session_state.downloads = []
+        render_downloads()
         status_text.info("Saving uploads and extracting source assets...")
         progress_bar.progress(5)
         
@@ -317,14 +338,14 @@ if start_btn:
                     with open(zip_out_path, "rb") as f:
                         zip_data = f.read()
                     
-                    download_area.download_button(
-                        label=f"Download {LANGUAGES[target_lang]} ZIP",
-                        data=zip_data,
-                        file_name=f"{zip_name}.zip",
-                        mime="application/zip",
-                        use_container_width=True,
-                        key=f"dl_{target_lang}_{job_id}"
-                    )
+                    st.session_state.downloads.append({
+                        "label": f"Download {LANGUAGES[target_lang]} ZIP",
+                        "data": zip_data,
+                        "file_name": f"{zip_name}.zip",
+                        "mime": "application/zip",
+                        "key": f"dl_{target_lang}_{job_id}"
+                    })
+                    render_downloads()
                     
             except Exception as e:
                 st.error(f"Execution Error for {target_lang}: {e}")
