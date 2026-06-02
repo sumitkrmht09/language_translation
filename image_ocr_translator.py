@@ -739,6 +739,7 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
                     "size": span["size"],
                     "font": span.get("font", ""),
                     "block_bbox": block["bbox"],
+                    "origin": span.get("origin", (span["bbox"][0], span["bbox"][3])),
                 })
 
     if not spans:
@@ -783,8 +784,8 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
             # Render text to transparent high-res PNG to bypass Adobe FrameMaker font embedding issues
             zoom = 4.0
             font = _get_font(int(span["size"] * zoom), bold=is_bold, target_lang=target_lang)
-            # Use getbbox for accurate sizing
-            left, top, right, bottom = font.getbbox(translated)
+            # Use getbbox with baseline anchor for accurate sizing
+            left, top, right, bottom = font.getbbox(translated, anchor="ls")
             text_width = right - left
             text_height = bottom - top
             
@@ -795,7 +796,11 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
             img_h = text_height + (padding_y * 2)
             img = Image.new("RGBA", (img_w, img_h), (0,0,0,0))
             draw = ImageDraw.Draw(img)
-            draw.text((padding_x - left, padding_y - top), translated, font=font, fill=(0, 0, 0, 255))
+            
+            # Draw text using Left-Baseline anchor so we know exactly where the baseline is
+            anchor_x = padding_x - left
+            anchor_y = padding_y - top
+            draw.text((anchor_x, anchor_y), translated, font=font, fill=(0, 0, 0, 255), anchor="ls")
             
             # get image bytes
             import io
@@ -813,7 +818,6 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
             # Adjust start point based on alignment
             if align == 1:  # Center
                 center_x = (x0 + x1) / 2
-                # Center the actual ink
                 ink_x0 = center_x - (ink_w / 2)
                 new_x0 = max(block_bbox[0] + 1, ink_x0) - (padding_x / zoom)
             elif align == 2:  # Right
@@ -822,10 +826,13 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
             else:  # Left
                 new_x0 = x0 - (padding_x / zoom)
                 
-            # Vertically center the text ink based on original bounding box height
-            ink_h = text_height / zoom
-            center_y = (y0 + y1) / 2
-            new_y0 = center_y - (physical_h / 2)
+            # Align perfectly using the true typographic baseline instead of bounding box center!
+            orig_baseline_y = span["origin"][1]
+            
+            # The baseline in our PNG is exactly at anchor_y.
+            # So the physical top of the PNG (new_y0) must be placed such that 
+            # its baseline lands on orig_baseline_y.
+            new_y0 = orig_baseline_y - (anchor_y / zoom)
                 
             # Insert the transparent PNG
             rect = fitz.Rect(new_x0, new_y0, new_x0 + physical_w, new_y0 + physical_h)
