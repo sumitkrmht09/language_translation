@@ -24,7 +24,7 @@ from translate_xliff_openai_2 import translate_file as run_translation, MODEL as
 # Page config
 st.set_page_config(
     page_title="FrameMaker Translation Studio",
-    page_icon="??",
+    page_icon="📝",
     layout="centered"
 )
 
@@ -132,14 +132,14 @@ graphics_zip = st.file_uploader(
 )
 
 target_langs = st.multiselect(
-    "?? Select Target Languages",
+    "Select Target Languages",
     options=list(LANGUAGES.keys()),
     format_func=lambda x: f"{LANGUAGES[x]} ({x})",
     help="Choose multiple languages to translate them all in parallel!"
 )
 
 st.markdown('<br>', unsafe_allow_html=True)
-start_btn = st.button("?? Translate & Process Graphics", use_container_width=True, type="primary")
+start_btn = st.button("Translate & Process Graphics", use_container_width=True, type="primary")
 st.markdown('</div>', unsafe_allow_html=True)
 
 # Download Button Area
