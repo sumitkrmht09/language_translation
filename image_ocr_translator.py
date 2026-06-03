@@ -921,6 +921,42 @@ def process_image(
     print(f"  ✓ Saved → {new_name}")
     return new_name
 
+def _process_single_pdf_page(source_path: Path, page_idx: int, target_lang: str) -> Tuple[int, Optional[bytes], bool]:
+    try:
+        doc = fitz.open(str(source_path))
+        page = doc[page_idx]
+        
+        orig_crop = page.cropbox
+        orig_media = page.mediabox
+        orig_rot = page.rotation
+        
+        if _has_real_text(page):
+            changed = _process_text_layer_page(page, target_lang)
+            print(f"      page {page_idx+1}: {'✓' if changed else '-'} "
+                  f"{'text-layer translated' if changed else 'text-layer: no changes'}", flush=True)
+        else:
+            changed = _process_image_layer_page(doc, page, target_lang)
+            print(f"      page {page_idx+1}: {'✓' if changed else '-'} "
+                  f"{'image-OCR translated' if changed else 'image-OCR: no text'}", flush=True)
+            
+        if changed:
+            page.set_cropbox(orig_crop)
+            page.set_mediabox(orig_media)
+            page.set_rotation(orig_rot)
+            
+            temp_doc = fitz.open()
+            temp_doc.insert_pdf(doc, from_page=page_idx, to_page=page_idx)
+            doc_bytes = temp_doc.write(garbage=4, deflate=True)
+            temp_doc.close()
+            doc.close()
+            return page_idx, doc_bytes, True
+        else:
+            doc.close()
+            return page_idx, None, False
+    except Exception as e:
+        print(f"      ✗ Error processing page {page_idx+1}: {e}", flush=True)
+        return page_idx, None, False
+
 def process_pdf(
     source_path: Path,
     target_lang: str,
@@ -928,7 +964,7 @@ def process_pdf(
     rename_with_lang: bool = True,
 ) -> str:
     source_path = Path(source_path)
-    print(f"\n  [PDF] {source_path.name}", flush=True)
+    print(f"\n  [PDF] {source_path.name} (Parallel Processing)", flush=True)
 
     try:
         doc = fitz.open(str(source_path))
@@ -950,43 +986,52 @@ def process_pdf(
         print(f"  ✓ Copied → {new_name}")
         return new_name
 
+    num_pages = len(doc)
+    doc.close()
+
     if not full_text.strip():
         print("  - No extractable text — will attempt image-layer OCR.")
 
+    import concurrent.futures
     any_changed = False
-    for idx in range(len(doc)):
-        page = doc[idx]
-        print(f"      page {idx+1}/{len(doc)}", flush=True)
-        
-        orig_crop = page.cropbox
-        orig_media = page.mediabox
-        orig_rot = page.rotation
-        
-        if _has_real_text(page):
-            changed = _process_text_layer_page(page, target_lang)
-            print(f"      {'✓' if changed else '-'} "
-                  f"{'text-layer translated' if changed else 'text-layer: no changes'}")
-        else:
-            changed = _process_image_layer_page(doc, page, target_lang)
-            print(f"      {'✓' if changed else '-'} "
-                  f"{'image-OCR translated' if changed else 'image-OCR: no text'}")
-                  
-        if changed:
-            any_changed = True
-            page.set_cropbox(orig_crop)
-            page.set_mediabox(orig_media)
-            page.set_rotation(orig_rot)
+    results = []
+
+    print(f"  Processing {num_pages} pages in parallel...", flush=True)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [
+            executor.submit(_process_single_pdf_page, source_path, idx, target_lang)
+            for idx in range(num_pages)
+        ]
+        for future in concurrent.futures.as_completed(futures):
+            idx, page_bytes, changed = future.result()
+            if changed:
+                any_changed = True
+            results.append((idx, page_bytes))
 
     if not any_changed:
         print("  - Nothing translated — copying unchanged.")
-        doc.close()
         shutil.copy2(str(source_path), str(out_path))
         print(f"  ✓ Copied → {new_name}")
         return new_name
 
+    # Reassemble PDF in correct order
+    results.sort(key=lambda x: x[0])
+    final_doc = fitz.open()
+    orig_doc = fitz.open(str(source_path))
+
+    for idx, page_bytes in results:
+        if page_bytes is not None:
+            page_doc = fitz.open("pdf", page_bytes)
+            final_doc.insert_pdf(page_doc)
+            page_doc.close()
+        else:
+            final_doc.insert_pdf(orig_doc, from_page=idx, to_page=idx)
+
+    orig_doc.close()
+
     tmp = str(out_path) + ".tmp.pdf"
-    doc.save(tmp, garbage=4, deflate=True)
-    doc.close()
+    final_doc.save(tmp, garbage=4, deflate=True)
+    final_doc.close()
     os.replace(tmp, str(out_path))
     print(f"  ✓ Saved → {new_name}")
     return new_name

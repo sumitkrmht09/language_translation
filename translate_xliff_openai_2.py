@@ -1050,27 +1050,40 @@ def translate_file(input_path, output_root, target_lang, args, model_to_use, pro
     print(f"  XLF path     : {xlf_out_path}")
     print(f"{'─'*62}\n")
 
-    for i, batch in enumerate(batches, 1):
-        log.info(f"Batch {i}/{len(batches)}")
-        result = translate_batch(batch, target_lang, sys_p, args.dry_run, model_to_use)
-        all_trans.update(result)
-        if not args.dry_run:
-            save_checkpoint(ckpt, all_trans)
-        
-        translated_count = len([u for u in all_units if u["id"] in all_trans])
-        if progress_callback:
-            progress_callback(
-                f"Translating segments batch {i}/{len(batches)}...",
-                i,
-                len(batches),
-                {
-                    "total_segments": total_segments,
-                    "translated_segments": translated_count
-                }
-            )
+    import threading
+    import concurrent.futures
 
-        if i < len(batches):
-            time.sleep(BATCH_DELAY)
+    lock = threading.Lock()
+    completed_batches = 0
+
+    def translate_and_update(i, batch):
+        nonlocal completed_batches
+        log.info(f"Starting batch {i}/{len(batches)}")
+        result = translate_batch(batch, target_lang, sys_p, args.dry_run, model_to_use)
+        with lock:
+            all_trans.update(result)
+            if not args.dry_run:
+                save_checkpoint(ckpt, all_trans)
+            completed_batches += 1
+            translated_count = len([u for u in all_units if u["id"] in all_trans])
+            if progress_callback:
+                progress_callback(
+                    f"Translating segments batch {completed_batches}/{len(batches)}...",
+                    completed_batches,
+                    len(batches),
+                    {
+                        "total_segments": total_segments,
+                        "translated_segments": translated_count
+                    }
+                )
+            log.info(f"Finished batch {i}/{len(batches)}")
+
+    max_workers = min(5, len(batches)) if batches else 1
+    if batches:
+        print(f"  Translating {len(batches)} batches in parallel (workers={max_workers})...", flush=True)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(translate_and_update, i, batch) for i, batch in enumerate(batches, 1)]
+            concurrent.futures.wait(futures)
 
     for u in skipped:
         all_trans[u["id"]] = u["source"]
