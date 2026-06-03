@@ -26,7 +26,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 
 MODEL       = "gpt-4o"
 MAX_TOKENS  = 8096
-BATCH_SIZE  = 40
+BATCH_SIZE  = 25
 BATCH_DELAY = 0.5
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -53,6 +53,7 @@ LANGUAGES = {
     "fi":    "Finnish (Suomi)",
     "nb":    "Norwegian (Norsk Bokmål)",
     "cs":    "Czech (Čeština)",
+    "hi":    "Hindi (हिन्दी)",
 }
 
 FM_LANG = {k: k for k in LANGUAGES}
@@ -413,17 +414,23 @@ def classify(unit):
     return "body"
 
 
-SYS_PROMPT = """You are a professional technical translator for laboratory equipment manuals.
+SYS_PROMPT = """You are a professional technical translator for software, programming, file format, and typesetting/publishing manuals (specifically Adobe FrameMaker MIF files).
 Translate the segments from English into {lang}.
+
 Rules:
 1. NEVER translate these -- return them verbatim: {dnt}
 2. Return ONLY plain text values. No XML tags in your response.
 3. Glossary (use these exact translations): {glossary}
-4. Segments with [SAFETY] prefix are safety-critical -- translate with maximum fidelity.
-5. For segments containing temperatures like "-20°C to +60°C" or "(-4°F to +140°F)",
-   preserve the numeric values and unit symbols exactly; only translate surrounding words.
-6. For segments that are pure numbers (e.g. "30", "25", "20") return them verbatim unchanged.
-7. Respond with ONLY a JSON object: {{"id":"translation"}}. No markdown, no explanation."""
+4. Ensure the JSON response contains EXACTLY the same keys as the input JSON. Do NOT omit any keys or combine translations under a single key.
+5. Technical translation guidelines for {lang}:
+   - Translate "gratuitous use" as "recours abondant" or "utilisation généreuse" (NOT "utilisation gratuite").
+   - Translate "big MIF file" or "large MIF file" as "gros fichier MIF" or "grand fichier MIF" (NOT "fichier MIF bug").
+   - Translate "recompile" / "recompiling" as "recompiler" / "en recompilant" (NOT "recompacter" / "recompactant").
+   - Translate "version string" as "version sous forme de chaîne de caractères" or "chaîne de version".
+   - Translate "syntax" as "syntaxe" (ensure correct spelling, NOT "synttax").
+   - Follow standard typography rules for {lang} (e.g., in French, always add a space before colons, e.g., "Note : " instead of "Note:").
+   - Maintain a consistent formal tone: use the formal "vous" and formal imperatives (e.g., "Notez que" or "Remarquez que" instead of "Remarque que").
+6. Respond with ONLY a JSON object: {{"id":"translation"}}. No markdown, no explanation."""
 
 
 def build_sys(target_lang):
@@ -531,72 +538,13 @@ def _inject_translation_into_source_clone(tgt, seg_el, mid_map, tag_mrk, tag_g):
         tgt.text = translated_text
         return
 
-    tgt_text_is_content = bool(tgt.text and tgt.text.strip())
-
-    all_no_translate = all(
-        c.get("translate", "yes").lower() == "no" for c in children
-    )
-    if all_no_translate:
-        placed = False
-        if tgt_text_is_content:
-            tgt.text = translated_text
-            placed = True
-        if not placed:
-            for child in children:
-                if child.tail and child.tail.strip():
-                    child.tail = translated_text
-                    placed = True
-                    break
-        if not placed:
-            children[-1].tail = translated_text
-        return
-
-    if tgt_text_is_content:
-        tgt.text = translated_text
-        for child in children:
-            if child.get("translate", "yes").lower() == "no":
-                child.text = None
-                child.tail = None
-        return
-
-    tgt.text = None
-
-    placed = False
-    for i, child in enumerate(children):
-        is_last = (i == len(children) - 1)
-        translatable = child.get("translate", "yes").lower() != "no"
-
-        if not placed:
-            if child.tail and child.tail.strip():
-                child.tail = translated_text
-                placed = True
-                for j in range(i + 1, len(children)):
-                    c = children[j]
-                    if c.get("translate", "yes").lower() == "no":
-                        c.text = None
-                    c.tail = None
-                return
-            elif translatable and child.text and child.text.strip():
-                child.text = translated_text
-                child.tail = None
-                placed = True
-                for j in range(i + 1, len(children)):
-                    c = children[j]
-                    if c.get("translate", "yes").lower() == "no":
-                        c.text = None
-                    c.tail = None
-                return
-            elif is_last:
-                child.tail = translated_text
-                placed = True
-            else:
-                if not translatable:
-                    child.text = None
-                child.tail = None
-        else:
-            if not translatable:
-                child.text = None
-            child.tail = None
+    tgt.text = translated_text
+    for child in tgt.iter():
+        if child == tgt:
+            continue
+        if child.get("translate", "yes").lower() != "no":
+            child.text = None
+        child.tail = None
 
 
 def write_back(units, translations, ns, target_lang):
@@ -623,13 +571,21 @@ def write_back(units, translations, ns, target_lang):
 
         if seg_el is not None:
             mid_map = {}
+            # Initialize all segment IDs in seg_el to empty string to prevent duplicate English text for merged-out segments
+            for child in seg_el.iter(tag_mrk):
+                if child.get("mtype") == "seg":
+                    mid_map[child.get("mid")] = ""
+
             for u in tu_units:
                 if u["mrk_mid"] is not None:
                     t = translations.get(u["id"])
                     if t is not None:
                         mid_map[u["mrk_mid"]] = t
+                    else:
+                        mid_map[u["mrk_mid"]] = u["source"]
 
-            if not mid_map:
+            # If all translations are empty/missing, fall back to original sources for all
+            if all(v == "" for v in mid_map.values()):
                 mid_map = {
                     u["mrk_mid"]: u["source"]
                     for u in tu_units if u["mrk_mid"] is not None
@@ -660,7 +616,7 @@ def write_back(units, translations, ns, target_lang):
             u = tu_units[0]
             t = translations.get(u["id"])
             if t is None:
-                continue
+                t = u["source"]
 
             if src_el is not None:
                 tgt = copy.deepcopy(src_el)
@@ -672,30 +628,19 @@ def write_back(units, translations, ns, target_lang):
                 tgt.set(XML_LANG, lang_code)
                 tgt.set("state", "translated")
                 tgt.tail = src_el.tail
+                
                 children = list(tgt)
                 if not children:
                     tgt.text = t
                 else:
-                    tgt.text = None
-                    placed = False
-                    for child in children:
-                        if not placed and child.tail and child.tail.strip():
-                            child.tail = t
-                            placed = True
-                        elif not placed and child.get("translate","yes").lower() != "no" \
-                                and child.text and child.text.strip():
-                            child.text = t
-                            child.tail = None
-                            placed = True
-                        else:
-                            if child.get("translate","yes").lower() == "no":
-                                child.text = None
-                            child.tail = None
-                    if not placed:
-                        if children:
-                            children[-1].tail = t
-                        else:
-                            tgt.text = t
+                    tgt.text = t
+                    for child in tgt.iter():
+                        if child == tgt:
+                            continue
+                        if child.get("translate", "yes").lower() != "no":
+                            child.text = None
+                        child.tail = None
+                        
                 idx = list(tu_el).index(src_el)
                 tu_el.insert(idx + 1, tgt)
             else:

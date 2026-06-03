@@ -62,6 +62,7 @@ LANG_NAMES: Dict[str, str] = {
     "tr":    "Turkish",              "sv":    "Swedish",
     "da":    "Danish",               "fi":    "Finnish",
     "nb":    "Norwegian",            "cs":    "Czech",
+    "hi":    "Hindi",
     "en":    "English",
 }
 
@@ -144,6 +145,9 @@ def _get_downloaded_font_path(target_lang: str, bold: bool) -> str:
     elif "ar" in lang_root:
         url = f"https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansArabic/NotoSansArabic-{weight}.ttf"
         filename = f"NotoSansArabic-{weight}.ttf"
+    elif "hi" in lang_root:
+        url = f"https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansDevanagari/NotoSansDevanagari-{weight}.ttf"
+        filename = f"NotoSansDevanagari-{weight}.ttf"
     else:
         url = f"https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSans/NotoSans-{weight}.ttf"
         filename = f"NotoSans-{weight}.ttf"
