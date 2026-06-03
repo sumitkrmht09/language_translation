@@ -348,18 +348,19 @@ def _ocr_translate(b64_image: str, target_lang: str,
         "You are a precise OCR and translation engine.\n"
         f"The image is {img_w}×{img_h} pixels.\n\n"
         "TASK\n"
-        "1. Detect EVERY piece of visible text in the image.\n"
-        f"2. Translate EVERY piece into {lang_name}. "
-        "Translate ALL text regardless of what language it appears to be in.\n"
+        "1. Detect visible text in the image that requires translation.\n"
+        f"2. Translate the text into {lang_name}.\n"
         "3. Return the tight bounding box of each text block in pixels AND a\n"
-        "   `bold` flag indicating whether the glyphs appear bold/heavy.\n\n"
-        "OUTPUT — return ONLY a valid JSON array, no markdown fences:\n"
-        '[{"original":"...","translated":"...","x":0,"y":0,"width":0,"height":0,"bold":false}]\n\n'
+        "   `bold` flag indicating whether the glyphs appear bold/heavy.\n"
+        "4. Add a `requires_translation` boolean flag. MUST BE FALSE if the image contains warning graphics, hazard symbols (e.g., Hand getting shocked, DANGER, HIGH VOLTAGE), safety labels, logos, or certification marks. If you see ANY such graphics in the image, set it to FALSE for ALL text in the image! Only translate pure instructional text without hazard symbols.\n\n"
+        "OUTPUT - return ONLY a valid JSON array, no markdown fences:\n"
+        '[{"original":"...","translated":"...","x":0,"y":0,"width":0,"height":0,"bold":false,"requires_translation":true}]\n\n'
         "RULES\n"
         f"* x,y = top-left corner in pixels relative to the {img_w}×{img_h} image.\n"
-        "* Include ALL text: headers, titles, table labels, cell text, captions.\n"
-        "* Preserve numbers, symbols, and product/model codes exactly.\n"
-        "* Brand names and proper nouns that do not translate: set translated=original.\n"
+        "* Include text that needs translation: headers, titles, table labels, cell text, captions.\n"
+        "* If `requires_translation` is false, set `translated` equal to `original`.\n"
+        "* Preserve numbers, symbols, and product/model codes exactly (set `translated` equal to `original` and `requires_translation` to false).\n"
+        "* Brand names and proper nouns that do not translate: set `requires_translation` to false.\n"
         "* `bold` is true ONLY if the glyph strokes are visibly thick/heavy;\n"
         "  otherwise false. Default to false when uncertain.\n"
         "* Do NOT wrap reply in markdown code blocks.\n"
@@ -744,6 +745,7 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
                     "size": span["size"],
                     "font": span.get("font", ""),
                     "block_bbox": block["bbox"],
+                    "origin": span.get("origin", (span["bbox"][0], span["bbox"][3])),
                 })
 
     if not spans:
@@ -788,8 +790,8 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
             # Render text to transparent high-res PNG to bypass Adobe FrameMaker font embedding issues
             zoom = 4.0
             font = _get_font(int(span["size"] * zoom), bold=is_bold, target_lang=target_lang)
-            # Use getbbox for accurate sizing
-            left, top, right, bottom = font.getbbox(translated)
+            # Use getbbox with baseline anchor for accurate sizing
+            left, top, right, bottom = font.getbbox(translated, anchor="ls")
             text_width = right - left
             text_height = bottom - top
             
@@ -800,7 +802,11 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
             img_h = text_height + (padding_y * 2)
             img = Image.new("RGBA", (img_w, img_h), (0,0,0,0))
             draw = ImageDraw.Draw(img)
-            draw.text((padding_x - left, padding_y - top), translated, font=font, fill=(0, 0, 0, 255))
+            
+            # Draw text using Left-Baseline anchor so we know exactly where the baseline is
+            anchor_x = padding_x - left
+            anchor_y = padding_y - top
+            draw.text((anchor_x, anchor_y), translated, font=font, fill=(0, 0, 0, 255), anchor="ls")
             
             # get image bytes
             import io
@@ -818,7 +824,6 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
             # Adjust start point based on alignment
             if align == 1:  # Center
                 center_x = (x0 + x1) / 2
-                # Center the actual ink
                 ink_x0 = center_x - (ink_w / 2)
                 new_x0 = max(block_bbox[0] + 1, ink_x0) - (padding_x / zoom)
             elif align == 2:  # Right
@@ -827,10 +832,13 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
             else:  # Left
                 new_x0 = x0 - (padding_x / zoom)
                 
-            # Vertically center the text ink based on original bounding box height
-            ink_h = text_height / zoom
-            center_y = (y0 + y1) / 2
-            new_y0 = center_y - (physical_h / 2)
+            # Align perfectly using the true typographic baseline instead of bounding box center!
+            orig_baseline_y = span["origin"][1]
+            
+            # The baseline in our PNG is exactly at anchor_y.
+            # So the physical top of the PNG (new_y0) must be placed such that 
+            # its baseline lands on orig_baseline_y.
+            new_y0 = orig_baseline_y - (anchor_y / zoom)
                 
             # Insert the transparent PNG
             rect = fitz.Rect(new_x0, new_y0, new_x0 + physical_w, new_y0 + physical_h)
@@ -854,7 +862,7 @@ def _process_image_layer_page(doc: fitz.Document,
     if not blocks:
         return False
 
-    if all((b.get("translated") or "").strip() == (b.get("original") or "").strip()
+    if all(not b.get("requires_translation", True) or (b.get("translated") or "").strip() == (b.get("original") or "").strip()
            for b in blocks):
         print("      - all OCR blocks unchanged")
         return False
@@ -903,7 +911,7 @@ def process_image(
         shutil.copy2(str(source_path), str(out_path))
         return new_name
 
-    if all((b.get("translated") or "").strip() == (b.get("original") or "").strip()
+    if all(not b.get("requires_translation", True) or (b.get("translated") or "").strip() == (b.get("original") or "").strip()
            for b in blocks):
         print("  - No text required translation — copying unchanged.")
         shutil.copy2(str(source_path), str(out_path))
