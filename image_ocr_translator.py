@@ -72,7 +72,8 @@ _LANG_ROOT: Dict[str, str] = {
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff"}
 PDF_EXTENSIONS   = {".pdf"}
-MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | PDF_EXTENSIONS
+SVG_EXTENSIONS   = {".svg"}
+MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | PDF_EXTENSIONS | SVG_EXTENSIONS
 
 
 def _lang_root(lang_code: str) -> str:
@@ -765,8 +766,11 @@ def _process_text_layer_page(page: fitz.Page, target_lang: str) -> bool:
 
     for span, _tr in to_process:
         x0, y0, x1, y1 = span["bbox"]
-        page.add_redact_annot(fitz.Rect(x0, y0 - 1, x1, y1 + 1), cross_out=False)
-    page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE, graphics=0)
+        # Completely avoid apply_redactions() as it deletes intersecting vector graphics (like table lines).
+        # Instead, just paint a white rectangle over the text ink.
+        # We shrink the width by 1.5 points on each side so it doesn't accidentally paint over the table borders!
+        safe_rect = fitz.Rect(x0 + 1.5, y0, x1 - 1.5, y1)
+        page.draw_rect(safe_rect, color=None, fill=(1, 1, 1), overlay=True)
 
     any_changed = False
     for span, translated in to_process:
@@ -920,6 +924,61 @@ def process_image(
     pil_img.save(str(out_path), **kw)
     print(f"  ✓ Saved → {new_name}")
     return new_name
+
+def process_svg(
+    source_path: Path,
+    target_lang: str,
+    dest_folder: Path,
+    rename_with_lang: bool = True
+) -> str:
+    import xml.etree.ElementTree as ET
+    import shutil
+    
+    new_name = (
+        source_path.name if not rename_with_lang
+        else f"{source_path.stem}_{target_lang}{source_path.suffix}"
+    )
+    out_path = dest_folder / new_name
+
+    try:
+        ET.register_namespace('', 'http://www.w3.org/2000/svg')
+        tree = ET.parse(source_path)
+        root = tree.getroot()
+        
+        texts_to_translate = []
+        text_elems = []
+        
+        for elem in root.iter():
+            if elem.tag.endswith('text') or elem.tag.endswith('tspan'):
+                txt = elem.text
+                if txt and txt.strip():
+                    texts_to_translate.append(txt)
+                    text_elems.append(elem)
+                    
+        if not texts_to_translate:
+            shutil.copy2(str(source_path), str(out_path))
+            return new_name
+            
+        translated_texts = _translate_texts_batch(texts_to_translate, target_lang)
+        
+        changed = False
+        for elem, tr in zip(text_elems, translated_texts):
+            orig = elem.text
+            if orig and tr and orig.strip() != tr.strip():
+                elem.text = orig.replace(orig.strip(), tr.strip())
+                changed = True
+                
+        if changed:
+            tree.write(out_path, encoding='utf-8', xml_declaration=True)
+            print(f"  ✓ Translated SVG {source_path.name}")
+        else:
+            shutil.copy2(str(source_path), str(out_path))
+            
+        return new_name
+    except Exception as e:
+        print(f"  - Failed to process SVG {source_path.name}: {e}")
+        shutil.copy2(str(source_path), str(out_path))
+        return new_name
 
 def process_pdf(
     source_path: Path,
@@ -1324,6 +1383,11 @@ def process_xlf_references(
                 )
             elif ext in PDF_EXTENSIONS:
                 new_name = process_pdf(
+                    abs_path, target_lang, dest_folder,
+                    rename_with_lang=rename_with_lang,
+                )
+            elif ext in SVG_EXTENSIONS:
+                new_name = process_svg(
                     abs_path, target_lang, dest_folder,
                     rename_with_lang=rename_with_lang,
                 )
